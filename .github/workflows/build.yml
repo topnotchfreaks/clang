@@ -1,0 +1,99 @@
+name: Build TNF Clang for Android Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build TNF Clang
+    runs-on: ubuntu-latest
+
+    env:
+      LLVM_BRANCH: main
+      CLANG_VENDOR: "TopNotchFreaks"
+      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set dynamic tag
+      id: version
+      run: echo "tag=tnfclang-$(date +'%Y.%m.%d')" >> "$GITHUB_OUTPUT"
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git cmake ninja-build python3 curl \
+          gcc g++ zlib1g-dev libgmp-dev libmpfr-dev libmpc-dev \
+          binutils xz-utils
+
+    - name: Clone LLVM
+      run: |
+        git clone https://github.com/llvm/llvm-project.git
+        cd llvm-project
+        git checkout ${{ env.LLVM_BRANCH }}
+
+    - name: Download MLGO Model
+      run: |
+        mkdir -p mlgo_models
+        curl -L -o mlgo_models/ReleaseModelThinlto https://github.com/google/ml-compiler-opt/releases/download/prod-2022-03-02/ReleaseModelThinlto
+
+    - name: Patch Clang Version Name
+      run: |
+        sed -i 's/#define CLANG_VERSION_STRING.*/#define CLANG_VERSION_STRING "TopNotchFreaks-clang 21.0.0git"/' \
+          llvm-project/clang/include/clang/Basic/Version.inc.in || true
+
+    - name: Configure LLVM for Android Kernel
+      run: |
+        mkdir llvm-build && cd llvm-build
+        cmake -G Ninja ../llvm-project/llvm \
+          -DLLVM_ENABLE_PROJECTS="clang;lld;clang-tools-extra;polly" \
+          -DLLVM_TARGETS_TO_BUILD="AArch64" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLLVM_USE_LINKER=lld \
+          -DLLVM_ENABLE_ASSERTIONS=OFF \
+          -DLLVM_ENABLE_ZLIB=ON \
+          -DLLVM_POLLY_LINK_INTO_TOOLS=ON \
+          -DLLVM_ENABLE_TERMINFO=OFF \
+          -DLLVM_INCLUDE_BENCHMARKS=OFF \
+          -DLLVM_INCLUDE_TESTS=OFF \
+          -DLLVM_INCLUDE_DOCS=OFF \
+          -DLLVM_INCLUDE_EXAMPLES=OFF \
+          -DCLANG_ENABLE_ARCMT=OFF \
+          -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+          -DLLVM_EXTERNAL_MLGO_MODEL_PATH=$GITHUB_WORKSPACE/mlgo_models/ReleaseModelThinlto \
+          -DCLANG_VENDOR="${{ env.CLANG_VENDOR }}" \
+          -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/clang-install
+
+    - name: Build LLVM/Clang
+      run: |
+        cd llvm-build
+        ninja -j$(nproc)
+
+    - name: Install Toolchain
+      run: |
+        cd llvm-build
+        ninja install
+
+    - name: Clean Unused Files (Lean Android Kernel Toolchain)
+      run: |
+        cd clang-install
+        rm -rf include share libexec
+        find . -type f -exec strip --strip-unneeded {} + || true
+
+    - name: Package Toolchain
+      run: |
+        cd clang-install
+        tar -czf ../topnotchfreaks-android-clang.tar.gz .
+
+    - name: Upload to GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: TopNotchFreaks-clang - ${{ steps.version.outputs.tag }}
+        files: topnotchfreaks-android-clang.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
