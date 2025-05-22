@@ -66,7 +66,7 @@ jobs:
         mkdir llvm-build && cd llvm-build
         cmake -G Ninja ../llvm-project/llvm \
           -DLLVM_ENABLE_PROJECTS="clang;lld;clang-tools-extra;polly" \
-          -DLLVM_TARGETS_TO_BUILD="AArch64;x86" \
+          -DLLVM_TARGETS_TO_BUILD="AArch64;X86" \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_C_COMPILER=clang \
           -DCMAKE_CXX_COMPILER=clang++ \
