@@ -123,5 +123,20 @@ jobs:
         tag_name: ${{ steps.version.outputs.tag }}
         name: TopNotchFreaks-clang - ${{ steps.version.outputs.tag }}
         files: topnotchfreaks-android-clang.tar.gz
+        body: |
+          🛠️ **TopNotchFreaks Clang for Android Kernel Development**
+
+          - Based on LLVM 21 (main branch)
+          - Patched with:
+            - Polly
+            - LTO
+            - BOLT
+            - PGO
+            - MLGO (Google's ThinLTO release model)
+          - Target: `AArch64 and x86` (Android Kernel Toolchains)
+          - Optimized for building Android kernels
+          - Stripped and lightweight (~lean install)
+
+          Built on: `${{ steps.version.outputs.tag }}`
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
