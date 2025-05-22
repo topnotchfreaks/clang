@@ -101,6 +101,17 @@ jobs:
         cd llvm-build
         ninja install
 
+    - name: Save ccache cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-${{ runner.os }}-${{ github.run_id }}
+        restore-keys: |
+          ccache-${{ runner.os }}
+    
+    - name: Show ccache stats
+      run: ccache -s
+
     - name: Clean Unused Files (Lean Android Kernel Toolchain)
       run: |
         cd clang-install
