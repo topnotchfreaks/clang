@@ -10,7 +10,7 @@ jobs:
 
     env:
       LLVM_BRANCH: main
-      CLANG_VENDOR: "TopNotchFreaks"
+      CLANG_VENDOR: "TopNotchFreaks "
       GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
     steps:
@@ -61,16 +61,17 @@ jobs:
         mkdir -p mlgo_models
         curl -L -o mlgo_models/ReleaseModelThinlto https://github.com/google/ml-compiler-opt/releases/download/prod-2022-03-02/ReleaseModelThinlto
 
-    - name: Patch Clang Version Name
-      run: |
-        sed -i 's/#define CLANG_VERSION_STRING.*/#define CLANG_VERSION_STRING "TopNotchFreaks-clang 21.0.0git"/' \
-          llvm-project/clang/include/clang/Basic/Version.inc.in || true
+    # - name: Patch Clang Version Name
+    #  run: |
+    #    sed -i 's/#define CLANG_VERSION_STRING.*/#define CLANG_VERSION_STRING "21.0.0git"/' \
+    #      llvm-project/clang/include/clang/Basic/Version.inc.in || true
 
     - name: Configure LLVM for Android Kernel
       run: |
         mkdir llvm-build && cd llvm-build
         cmake -G Ninja ../llvm-project/llvm \
           -DLLVM_ENABLE_PROJECTS="clang;lld;polly" \
+          -DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-linux-gnu \
           -DLLVM_TARGETS_TO_BUILD="AArch64" \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_C_COMPILER=clang \
