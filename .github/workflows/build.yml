@@ -19,7 +19,7 @@ jobs:
 
     - name: Set dynamic tag
       id: version
-      run: echo "tag=tnfclang-$(date +'%Y.%m.%d')" >> "$GITHUB_OUTPUT"
+      run: echo "tag=tnfclang-$(date +'%Y.%m.%d-%H.%M.%S')" >> "$GITHUB_OUTPUT"
 
     - name: Install dependencies
       run: |
@@ -33,33 +33,12 @@ jobs:
         sudo apt install -y clang lld
         export CC=clang
         export CXX=clang++
-
-    - name: Restore ccache cache
-      uses: actions/cache@v4
-      with:
-        path: ~/.ccache
-        key: ccache-${{ runner.os }}-${{ github.run_id }}
-        restore-keys: |
-          ccache-${{ runner.os }}
-
-    - name: Set up ccache
-      run: |
-        sudo apt install -y ccache
-        mkdir -p ~/.ccache
-        echo 'max_size = 5.0G' > ~/.ccache/ccache.conf
-        export CC="ccache clang"
-        export CXX="ccache clang++"
     
     - name: Clone LLVM
       run: |
-        git clone https://github.com/llvm/llvm-project.git
+        git clone --depth=1 https://github.com/llvm/llvm-project.git
         cd llvm-project
         git checkout ${{ env.LLVM_BRANCH }}
-
-    - name: Download MLGO Model
-      run: |
-        mkdir -p mlgo_models
-        curl -L -o mlgo_models/ReleaseModelThinlto https://github.com/google/ml-compiler-opt/releases/download/prod-2022-03-02/ReleaseModelThinlto
 
     - name: Configure LLVM for Android Kernel
       run: |
@@ -81,30 +60,18 @@ jobs:
           -DLLVM_INCLUDE_EXAMPLES=OFF \
           -DCLANG_ENABLE_OBJC_REWRITER=OFF \
           -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
-          -DLLVM_EXTERNAL_MLGO_MODEL_PATH=$GITHUB_WORKSPACE/mlgo_models/ReleaseModelThinlto \
           -DCLANG_VENDOR="${{ env.CLANG_VENDOR }}" \
           -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/clang-install
 
     - name: Build LLVM/Clang
       run: |
         cd llvm-build
-        ninja -j$(nproc)
+        ninja -j$(nproc) clang lld Polly
 
     - name: Install Toolchain
       run: |
         cd llvm-build
         ninja install
-
-    - name: Save ccache cache
-      uses: actions/cache@v4
-      with:
-        path: ~/.ccache
-        key: ccache-${{ runner.os }}-${{ github.run_id }}
-        restore-keys: |
-          ccache-${{ runner.os }}
-    
-    - name: Show ccache stats
-      run: ccache -s
 
     - name: Clean Unused Files (Lean Android Kernel Toolchain)
       run: |
@@ -127,12 +94,6 @@ jobs:
           🛠️ **TopNotchFreaks Clang for Android Kernel Development**
 
           - Based on LLVM 21 (main branch)
-          - Patched with:
-            - Polly
-            - LTO
-            - BOLT
-            - PGO
-            - MLGO (Google's ThinLTO release model)
           - Target: `AArch64 and x86` (Android Kernel Toolchains)
           - Optimized for building Android kernels
           - Stripped and lightweight (~lean install)
