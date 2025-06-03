@@ -49,13 +49,6 @@ jobs:
         echo "Current linker: $(update-alternatives --list ld || true)"
         echo "Selected linker: $(readlink -f /usr/bin/ld)"
 
-    - name: Cleanup LLVM Installation (Reduce Image Size)
-      run: |
-        # Remove unnecessary LLVM 18 components
-        sudo apt-get remove -y llvm-18-tools lldb-18 libllvm18
-        sudo apt-get autoremove -y
-        sudo rm -rf /usr/lib/llvm-18/lib/*.a /usr/lib/llvm-18/share
-
     - name: Set Environment Variables
       run: |
         echo "CC=clang-18" >> $GITHUB_ENV
@@ -64,11 +57,6 @@ jobs:
         echo "AR=llvm-ar-18" >> $GITHUB_ENV
         echo "NM=llvm-nm-18" >> $GITHUB_ENV
         echo "STRIP=llvm-strip-18" >> $GITHUB_ENV
-            
-    - name: Set Clang as host compiler
-      run: |
-        export CC=clang
-        export CXX=clang++
     
     - name: Clone LLVM
       run: |
