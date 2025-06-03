@@ -41,6 +41,29 @@ jobs:
         sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-18 100
 
         sudo update-alternatives --set ld /usr/bin/ld.lld-18
+
+    - name: Verify LLVM Installation
+      run: |
+        echo "Clang version: $(clang-18 --version)"
+        echo "LLD version: $(ld.lld-18 --version)"
+        echo "Current linker: $(update-alternatives --list ld || true)"
+        echo "Selected linker: $(readlink -f /usr/bin/ld)"
+
+    - name: Cleanup LLVM Installation (Reduce Image Size)
+      run: |
+        # Remove unnecessary LLVM 18 components
+        sudo apt-get remove -y llvm-18-tools lldb-18 libllvm18
+        sudo apt-get autoremove -y
+        sudo rm -rf /usr/lib/llvm-18/lib/*.a /usr/lib/llvm-18/share
+
+    - name: Set Environment Variables
+      run: |
+        echo "CC=clang-18" >> $GITHUB_ENV
+        echo "CXX=clang++-18" >> $GITHUB_ENV
+        echo "LD=ld.lld-18" >> $GITHUB_ENV
+        echo "AR=llvm-ar-18" >> $GITHUB_ENV
+        echo "NM=llvm-nm-18" >> $GITHUB_ENV
+        echo "STRIP=llvm-strip-18" >> $GITHUB_ENV
             
     - name: Set Clang as host compiler
       run: |
@@ -100,16 +123,16 @@ jobs:
         cd llvm-build
         ninja install
 
-    - name: Clean Unused Files (Lean Android Kernel Toolchain)
+    - name: Minimize Toolchain Size
       run: |
         cd clang-install
-        rm -rf include share libexec docs
+        find . -name "*.a" -delete
+        find . -name "*.la" -delete
+        find . -name "*.o" -delete
+        # Aggressive stripping
         find bin -type f -exec strip --strip-all {} + || true
         find lib -type f -name "*.so*" -exec strip --strip-all {} + || true
-        # Remove debug symbols
-        find . -type f -name "*.a" -exec strip --strip-debug {} + || true
-        # Remove static archives not needed for kernel building
-        rm -rf lib/*.a
+        rm -rf include share libexec man
 
     - name: Package Toolchain
       run: |
