@@ -28,7 +28,7 @@ jobs:
           gcc g++ zlib1g-dev libgmp-dev libmpfr-dev libmpc-dev \
           binutils binutils-dev binutils-gold xz-utils
 
-    - name: Install matching LLVM version
+    - name: Install LLVM 20 as host compiler
       run: |
         sudo apt-get remove -y '^llvm-.*' '^clang-.*' '^lld-.*' llvm clang lld
         sudo apt-get autoremove -y
@@ -37,27 +37,27 @@ jobs:
         sudo apt-get install -y wget software-properties-common
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 18
-        sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-18 100
+        sudo ./llvm.sh 20
 
-        sudo update-alternatives --set ld /usr/bin/ld.lld-18
+        sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-20 100
+        sudo update-alternatives --set ld /usr/bin/ld.lld-20
 
     - name: Verify LLVM Installation
       run: |
-        echo "Clang version: $(clang-18 --version)"
-        echo "LLD version: $(ld.lld-18 --version)"
+        echo "Clang version: $(clang-20 --version)"
+        echo "LLD version: $(ld.lld-20 --version)"
         echo "Current linker: $(update-alternatives --list ld || true)"
         echo "Selected linker: $(readlink -f /usr/bin/ld)"
 
     - name: Set Environment Variables
       run: |
-        echo "CC=clang-18" >> $GITHUB_ENV
-        echo "CXX=clang++-18" >> $GITHUB_ENV
-        echo "LD=ld.lld-18" >> $GITHUB_ENV
-        echo "AR=llvm-ar-18" >> $GITHUB_ENV
-        echo "NM=llvm-nm-18" >> $GITHUB_ENV
-        echo "STRIP=llvm-strip-18" >> $GITHUB_ENV
-    
+        echo "CC=clang-20" >> $GITHUB_ENV
+        echo "CXX=clang++-20" >> $GITHUB_ENV
+        echo "LD=ld.lld-20" >> $GITHUB_ENV
+        echo "AR=llvm-ar-20" >> $GITHUB_ENV
+        echo "NM=llvm-nm-20" >> $GITHUB_ENV
+        echo "STRIP=llvm-strip-20" >> $GITHUB_ENV
+
     - name: Clone LLVM
       run: |
         git clone --depth=1 https://github.com/llvm/llvm-project.git
