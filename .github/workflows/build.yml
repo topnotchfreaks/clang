@@ -34,29 +34,36 @@ jobs:
         sudo apt-get autoremove -y
         sudo rm -rf /usr/lib/llvm-* /usr/lib/cmake/llvm
 
-        sudo apt-get install -y wget software-properties-common
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh 20
+        sudo apt-get install -y clang-20 lld-20 llvm-20
 
-        sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-20 100
-        sudo update-alternatives --set ld /usr/bin/ld.lld-20
+        # Create symlinks to versioned binaries
+        sudo ln -sf /usr/bin/clang-20 /usr/bin/clang
+        sudo ln -sf /usr/bin/clang++-20 /usr/bin/clang++
+        sudo ln -sf /usr/bin/ld.lld-20 /usr/bin/ld.lld
 
-    - name: Verify LLVM Installation
-      run: |
-        echo "Clang version: $(clang-20 --version)"
-        echo "LLD version: $(ld.lld-20 --version)"
-        echo "Current linker: $(update-alternatives --list ld || true)"
-        echo "Selected linker: $(readlink -f /usr/bin/ld)"
+        # Verify installation
+        clang --version
+        clang++ --version
+        ld.lld --version
 
     - name: Set Environment Variables
       run: |
-        echo "CC=clang-20" >> $GITHUB_ENV
-        echo "CXX=clang++-20" >> $GITHUB_ENV
-        echo "LD=ld.lld-20" >> $GITHUB_ENV
-        echo "AR=llvm-ar-20" >> $GITHUB_ENV
-        echo "NM=llvm-nm-20" >> $GITHUB_ENV
-        echo "STRIP=llvm-strip-20" >> $GITHUB_ENV
+        echo "CC=/usr/bin/clang-20" >> $GITHUB_ENV
+        echo "CXX=/usr/bin/clang++-20" >> $GITHUB_ENV
+        echo "LD=/usr/bin/ld.lld-20" >> $GITHUB_ENV
+        echo "AR=/usr/bin/llvm-ar-20" >> $GITHUB_ENV
+        echo "NM=/usr/bin/llvm-nm-20" >> $GITHUB_ENV
+        echo "STRIP=/usr/bin/llvm-strip-20" >> $GITHUB_ENV
+
+    - name: Verify LLVM Installation
+      run: |
+        echo "Clang version: $(clang --version)"
+        echo "LLD version: $(ld.lld --version)"
+        echo "Current linker: $(update-alternatives --list ld || true)"
+        echo "Selected linker: $(readlink -f /usr/bin/ld)"
 
     - name: Clone LLVM
       run: |
@@ -71,8 +78,9 @@ jobs:
           -DLLVM_ENABLE_PROJECTS="clang;lld;bolt;polly" \
           -DLLVM_TARGETS_TO_BUILD="AArch64;ARM" \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_C_COMPILER=clang \
-          -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_C_COMPILER=/usr/bin/clang-20 \
+          -DCMAKE_CXX_COMPILER=/usr/bin/clang++-20 \
+          -DCMAKE_ASM_COMPILER=/usr/bin/clang-20 \
           -DCMAKE_C_FLAGS="-Os -fomit-frame-pointer" \
           -DCMAKE_CXX_FLAGS="-Os -fomit-frame-pointer" \
           -DLLVM_USE_LINKER=lld \
