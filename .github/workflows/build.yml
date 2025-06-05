@@ -100,7 +100,7 @@ jobs:
     - name: Build LLVM/Clang
       run: |
         cd llvm-build
-        ninja -j(nproc) clang lld Polly bolt
+        ninja -j$(nproc) clang lld Polly bolt
 
     - name: Generate PGO Profiles
       run: |
