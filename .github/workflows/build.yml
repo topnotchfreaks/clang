@@ -109,9 +109,14 @@ jobs:
     - name: Generate PGO Profiles
       run: |
         cd llvm-build
-        ./bin/clang -O2 -fprofile-generate ../llvm-project/llvm/test/ -o llvm-test
-        ./llvm-test
-        llvm-profdata merge -output=profdata.prof default_*.profraw
+        # Create test program
+        echo -e '#include <stdio.h>\nint main(){printf("PGO test\\n");return 0;}' > pgo_test.c
+        # Build with instrumentation
+        ./bin/clang -O2 -fprofile-generate pgo_test.c -o pgo_test
+        # Run the test program
+        ./pgo_test
+        # Merge profiles
+        ./bin/llvm-profdata merge -output=profdata.prof default_*.profraw
 
     - name: Rebuild with PGO
       run: |
