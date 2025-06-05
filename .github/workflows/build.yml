@@ -1,11 +1,11 @@
-name: Build TNF Clang for Android Kernel
+name: Build Clang
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build TNF Clang
+    name: Build Clang
     runs-on: ubuntu-latest
 
     env:
