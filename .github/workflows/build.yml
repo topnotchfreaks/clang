@@ -109,14 +109,17 @@ jobs:
     - name: Generate PGO Profiles
       run: |
         cd llvm-build
-        # Create test program
+        TARGET_TRIPLE="aarch64-linux-gnu"
+
         echo -e '#include <stdio.h>\nint main(){printf("PGO test\\n");return 0;}' > pgo_test.c
-        # Build with instrumentation
-        ./bin/clang -O2 -fprofile-generate pgo_test.c -o pgo_test
-        # Run the test program
+
+        ./bin/clang -O2 -fprofile-generate --target=$TARGET_TRIPLE pgo_test.c -o pgo_test
+
         ./pgo_test
-        # Merge profiles
+
         ./bin/llvm-profdata merge -output=profdata.prof default_*.profraw
+
+        ./bin/llvm-profdata show profdata.prof
 
     - name: Rebuild with PGO
       run: |
