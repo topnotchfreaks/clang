@@ -26,7 +26,9 @@ jobs:
         sudo apt update
         sudo apt install -y git cmake ninja-build python3 curl \
           gcc g++ zlib1g-dev libgmp-dev libmpfr-dev libmpc-dev \
-          binutils binutils-dev binutils-gold xz-utils
+          binutils binutils-dev binutils-gold xz-utils \
+          gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+          libc6-dev-arm64-cross
 
     - name: Install LLVM 20 as host compiler
       run: |
@@ -113,12 +115,16 @@ jobs:
 
         echo -e '#include <stdio.h>\nint main(){printf("PGO test\\n");return 0;}' > pgo_test.c
 
-        ./bin/clang -O2 -fprofile-generate --target=$TARGET_TRIPLE pgo_test.c -o pgo_test
+        ./bin/clang -O2 -fprofile-generate \
+          --target=$TARGET_TRIPLE \
+          --sysroot=/usr/aarch64-linux-gnu \
+          -I/usr/aarch64-linux-gnu/include \
+          pgo_test.c -o pgo_test
 
-        ./pgo_test
+        sudo apt-get install -y qemu-user
+        qemu-aarch64 -L /usr/aarch64-linux-gnu ./pgo_test
 
         ./bin/llvm-profdata merge -output=profdata.prof default_*.profraw
-
         ./bin/llvm-profdata show profdata.prof
 
     - name: Rebuild with PGO
