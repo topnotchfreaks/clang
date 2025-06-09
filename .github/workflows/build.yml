@@ -88,7 +88,7 @@ jobs:
       run: |
         mkdir llvm-build && cd llvm-build
         cmake -G Ninja ../llvm-project/llvm \
-          -DLLVM_ENABLE_PROJECTS="clang;lld;bolt;polly" \
+          -DLLVM_ENABLE_PROJECTS="clang;lld;bolt;polly;compiler-rt" \
           -DLLVM_TARGETS_TO_BUILD="AArch64;ARM" \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_C_COMPILER=/usr/bin/clang-20 \
@@ -112,22 +112,25 @@ jobs:
           -DCLANG_DEFAULT_LINKER=lld \
           -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
           -DCLANG_PLUGIN_SUPPORT=OFF \
-          -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/clang-install
+          -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/clang-install \
+          -DCOMPILER_RT_BUILD_PROFILE=ON \
+          -DCOMPILER_RT_BUILD_BUILTINS=ON \
+          -DCOMPILER_RT_DEFAULT_TARGET_TRIPLE=aarch64-linux-gnu
 
     - name: Build LLVM/Clang
       run: |
         cd llvm-build
-        ninja -j$(nproc) clang lld Polly bolt
+        ninja -j$(nproc) clang lld Polly bolt compiler-rt install-compiler-rt
 
     - name: Generate PGO Profiles
       run: |
         cd llvm-build
         TARGET_TRIPLE="aarch64-linux-gnu"
-        
+
         # Create test program
         echo -e '#include <stdio.h>\nint main(){printf("PGO test\\n");return 0;}' > pgo_test.c
-        
-        # Build with complete sysroot and library paths
+
+        # Build with explicit runtime library paths
         ./bin/clang -O2 -fprofile-generate \
           --target=$TARGET_TRIPLE \
           --sysroot=/usr/aarch64-linux-gnu \
@@ -135,17 +138,18 @@ jobs:
           -B/usr/lib/gcc-cross/aarch64-linux-gnu/11 \
           -L/usr/aarch64-linux-gnu/lib \
           -L/usr/lib/gcc-cross/aarch64-linux-gnu/11 \
+          -L$GITHUB_WORKSPACE/clang-install/lib/clang/21/lib/aarch64-unknown-linux-gnu \
           pgo_test.c -o pgo_test \
           -fuse-ld=lld \
-          -rtlib=compiler-rt
-        
+          -rtlib=compiler-rt \
+          -Wl,--rpath=$GITHUB_WORKSPACE/clang-install/lib/clang/21/lib/aarch64-unknown-linux-gnu
+
         # Run via QEMU
         sudo apt-get install -y qemu-user
         qemu-aarch64 -L /usr/aarch64-linux-gnu ./pgo_test
-        
+
         # Merge profiles
         ./bin/llvm-profdata merge -output=profdata.prof default_*.profraw
-        ./bin/llvm-profdata show profdata.prof
 
     - name: Rebuild with PGO
       run: |
