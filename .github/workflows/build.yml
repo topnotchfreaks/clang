@@ -30,6 +30,17 @@ jobs:
           gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
           libc6-dev-arm64-cross
 
+    - name: Install Full Cross-Compilation Toolchain
+      run: |
+        sudo apt-get install -y \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu \
+          libc6-dev-arm64-cross \
+          libgcc-11-dev-arm64-cross \
+          libstdc++-11-dev-arm64-cross
+        sudo mkdir -p /usr/aarch64-linux-gnu/usr/lib
+        sudo ln -s /usr/aarch64-linux-gnu/lib /usr/aarch64-linux-gnu/usr/lib
+
     - name: Install LLVM 20 as host compiler
       run: |
         sudo apt-get remove -y '^llvm-.*' '^clang-.*' '^lld-.*' llvm clang lld
@@ -112,18 +123,27 @@ jobs:
       run: |
         cd llvm-build
         TARGET_TRIPLE="aarch64-linux-gnu"
-
+        
+        # Create test program
         echo -e '#include <stdio.h>\nint main(){printf("PGO test\\n");return 0;}' > pgo_test.c
-
+        
+        # Build with complete sysroot and library paths
         ./bin/clang -O2 -fprofile-generate \
           --target=$TARGET_TRIPLE \
           --sysroot=/usr/aarch64-linux-gnu \
-          -I/usr/aarch64-linux-gnu/include \
-          pgo_test.c -o pgo_test
-
+          --gcc-toolchain=/usr \
+          -B/usr/lib/gcc-cross/aarch64-linux-gnu/11 \
+          -L/usr/aarch64-linux-gnu/lib \
+          -L/usr/lib/gcc-cross/aarch64-linux-gnu/11 \
+          pgo_test.c -o pgo_test \
+          -fuse-ld=lld \
+          -rtlib=compiler-rt
+        
+        # Run via QEMU
         sudo apt-get install -y qemu-user
         qemu-aarch64 -L /usr/aarch64-linux-gnu ./pgo_test
-
+        
+        # Merge profiles
         ./bin/llvm-profdata merge -output=profdata.prof default_*.profraw
         ./bin/llvm-profdata show profdata.prof
 
