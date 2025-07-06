@@ -20,12 +20,6 @@ jobs:
       id: version
       run: echo "tag=tnf-clang-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
 
-    - name: Free Disk Space
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo docker system prune -af
-        df -h
-
     - name: Install Dependencies
       run: |
         sudo apt update
