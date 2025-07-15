@@ -20,40 +20,44 @@ jobs:
       id: version
       run: echo "tag=tnf-clang20-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
 
-    - name: Download Pre-built Clang 20
+    - name: Install Clang 20 from APT
       run: |
-        # Download official LLVM 20 release
-        wget -q https://github.com/llvm/llvm-project/releases/download/llvmorg-20.0.0/clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+        # Use official LLVM installation script
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 20
         
-        # Extract
-        tar -xf clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04.tar.xz
-        mv clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04 clang-20
+        # Create directory structure and copy binaries
+        mkdir -p clang-20/bin
+        cp /usr/bin/clang-20 clang-20/bin/clang
+        cp /usr/bin/clang++-20 clang-20/bin/clang++
+        cp /usr/bin/lld-20 clang-20/bin/lld
+        cp /usr/bin/ld.lld-20 clang-20/bin/ld.lld
+        cp /usr/bin/llvm-ar-20 clang-20/bin/llvm-ar
+        cp /usr/bin/llvm-nm-20 clang-20/bin/llvm-nm
+        cp /usr/bin/llvm-objcopy-20 clang-20/bin/llvm-objcopy
+        cp /usr/bin/llvm-strip-20 clang-20/bin/llvm-strip
+        cp /usr/bin/llvm-objdump-20 clang-20/bin/llvm-objdump
+        cp /usr/bin/llvm-readelf-20 clang-20/bin/llvm-readelf
+        
+        # Copy libraries
+        mkdir -p clang-20/lib
+        cp -r /usr/lib/llvm-20/lib/clang clang-20/lib/
 
     - name: Optimize Toolchain
       run: |
         cd clang-20
         
         # Remove unnecessary components to reduce size
-        rm -rf share/doc share/man include libexec
-        rm -rf lib/cmake lib/clang/*/include/cuda_wrappers
-        rm -rf lib/clang/*/include/openmp_wrappers
-        
-        # Keep only essential binaries
-        cd bin
-        KEEP_BINS="clang clang++ clang-20 lld ld.lld llvm-ar llvm-nm llvm-objcopy llvm-strip llvm-objdump llvm-readelf"
-        
-        # Remove everything except essential binaries
-        for bin in *; do
-          if [[ ! " $KEEP_BINS " =~ " $bin " ]]; then
-            rm -f "$bin"
-          fi
-        done
+        rm -rf lib/clang/*/include/cuda_wrappers 2>/dev/null || true
+        rm -rf lib/clang/*/include/openmp_wrappers 2>/dev/null || true
         
         # Create symlinks for missing tools
+        cd bin
         ln -sf clang clang-cpp
         ln -sf lld ld64.lld
-        ln -sf llvm-objcopy llvm-objcopy-20
-        ln -sf llvm-strip llvm-strip-20
+        ln -sf clang clang-20
+        ln -sf clang++ clang++-20
 
     - name: Create Android Kernel Wrappers
       run: |
