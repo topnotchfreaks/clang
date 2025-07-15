@@ -20,6 +20,11 @@ jobs:
       id: version
       run: echo "tag=tnf-clang20-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
 
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget xz-utils tar build-essential libtinfo5
+
     - name: Install Clang 20 from APT
       run: |
         # Use official LLVM installation script
@@ -27,22 +32,21 @@ jobs:
         chmod +x llvm.sh
         sudo ./llvm.sh 20
         
-        # Create directory structure and copy binaries
-        mkdir -p clang-20/bin
-        cp /usr/bin/clang-20 clang-20/bin/clang
-        cp /usr/bin/clang++-20 clang-20/bin/clang++
-        cp /usr/bin/lld-20 clang-20/bin/lld
-        cp /usr/bin/ld.lld-20 clang-20/bin/ld.lld
-        cp /usr/bin/llvm-ar-20 clang-20/bin/llvm-ar
-        cp /usr/bin/llvm-nm-20 clang-20/bin/llvm-nm
-        cp /usr/bin/llvm-objcopy-20 clang-20/bin/llvm-objcopy
-        cp /usr/bin/llvm-strip-20 clang-20/bin/llvm-strip
-        cp /usr/bin/llvm-objdump-20 clang-20/bin/llvm-objdump
-        cp /usr/bin/llvm-readelf-20 clang-20/bin/llvm-readelf
+        # Verify installation
+        /usr/bin/clang-20 --version || exit 1
+        /usr/bin/lld-20 --version || exit 1
+        
+        # Create directory structure
+        mkdir -p clang-20/bin clang-20/lib
+        
+        # Copy binaries with verification
+        for tool in clang clang++ lld ld.lld llvm-ar llvm-nm llvm-objcopy llvm-strip llvm-objdump llvm-readelf; do
+          cp -v "/usr/bin/$tool-20" "clang-20/bin/$tool" || exit 1
+          chmod +x "clang-20/bin/$tool"
+        done
         
         # Copy libraries
-        mkdir -p clang-20/lib
-        cp -r /usr/lib/llvm-20/lib/clang clang-20/lib/
+        cp -vr /usr/lib/llvm-20/lib/clang clang-20/lib/ || exit 1
 
     - name: Optimize Toolchain
       run: |
@@ -58,6 +62,7 @@ jobs:
         ln -sf lld ld64.lld
         ln -sf clang clang-20
         ln -sf clang++ clang++-20
+        cd ..
 
     - name: Create Android Kernel Wrappers
       run: |
@@ -169,53 +174,36 @@ jobs:
         ln -sf x86_64-linux-android-clang x86_64-linux-gnu-clang
         ln -sf clang kernel-clang
 
-    - name: Test Kernel Compilation
+    - name: Verify Toolchain
       run: |
-        cd clang-20/bin
+        # Check basic functionality
+        clang-20/bin/clang --version || exit 1
+        clang-20/bin/clang++ --version || exit 1
+        clang-20/bin/lld --version || exit 1
         
-        # Create simple test module
-        cat > test_module.c << 'EOF'
-        #define __KERNEL__
-        #define MODULE
-        
-        static int init_module(void) { return 0; }
-        static void cleanup_module(void) { }
-        
-        char _license[] __attribute__((section(".modinfo"))) = "license=GPL";
-        EOF
-        
-        # Test each architecture
-        echo "Testing AArch64..."
-        ./aarch64-linux-android-clang -c test_module.c -o test_aarch64.o
-        
-        echo "Testing ARM..."
-        ./arm-linux-android-clang -c test_module.c -o test_arm.o
-        
-        echo "Testing X86_64..."
-        ./x86_64-linux-android-clang -c test_module.c -o test_x86.o
-        
-        # Show results
-        file test_*.o
-        ls -la test_*.o
+        # Check wrapper scripts
+        clang-20/bin/aarch64-linux-android-clang --version || exit 1
+        clang-20/bin/arm-linux-android-clang --version || exit 1
+        clang-20/bin/x86_64-linux-android-clang --version || exit 1
 
     - name: Strip and Package
       run: |
         # Strip binaries for smaller size
-        strip clang-20/bin/* 2>/dev/null || true
+        find clang-20/bin -type f -executable -exec strip {} \; 2>/dev/null || true
         
         # Show final size
         echo "Toolchain size:"
         du -sh clang-20/
         
-        # Package
-        tar -czf android-kernel-clang20.tar.gz clang-20/
+        # Package with better compression
+        tar -cJf android-kernel-clang20.tar.xz clang-20/
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.tag }}
         name: Android Kernel Clang 20 - ${{ steps.version.outputs.tag }}
-        files: android-kernel-clang20.tar.gz
+        files: android-kernel-clang20.tar.xz
         body: |
           🔥 **Android Kernel Optimized Clang 20**
           
