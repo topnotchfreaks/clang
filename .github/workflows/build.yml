@@ -18,38 +18,36 @@ jobs:
 
     - name: Set Version
       id: version
-      run: echo "tag=tnf-clang-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
+      run: echo "tag=tnf-clang20-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
 
     - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y cmake ninja-build python3 \
-          gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-          binutils-aarch64-linux-gnu
+        sudo apt install -y cmake ninja-build python3
 
-    - name: Install Host Clang
+    - name: Install Host Clang 20
       run: |
         wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-        echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+        echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
         sudo apt update
-        sudo apt install -y clang-19 lld-19 llvm-19
+        sudo apt install -y clang-20 lld-20 llvm-20
 
     - name: Clone LLVM
       run: |
-        git clone --depth=1 --branch=main https://github.com/llvm/llvm-project.git
+        git clone --depth=1 --branch=release/20.x https://github.com/llvm/llvm-project.git
 
     - name: Configure Build
       run: |
         mkdir build && cd build
         cmake -G Ninja ../llvm-project/llvm \
-          -DLLVM_ENABLE_PROJECTS="clang;lld;polly" \
+          -DLLVM_ENABLE_PROJECTS="clang;lld" \
           -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_C_COMPILER=clang-19 \
-          -DCMAKE_CXX_COMPILER=clang++-19 \
+          -DCMAKE_C_COMPILER=clang-20 \
+          -DCMAKE_CXX_COMPILER=clang++-20 \
           -DCMAKE_C_FLAGS="-O3 -march=native -mtune=native" \
           -DCMAKE_CXX_FLAGS="-O3 -march=native -mtune=native" \
-          -DLLVM_USE_LINKER=lld-19 \
+          -DLLVM_USE_LINKER=lld-20 \
           -DLLVM_ENABLE_LTO=Thin \
           -DLLVM_ENABLE_ASSERTIONS=OFF \
           -DLLVM_INCLUDE_TESTS=OFF \
@@ -142,12 +140,43 @@ jobs:
         exec "$(dirname "$0")/clang" "${KERNEL_FLAGS[@]}" "$@"
         EOF
         
+        # X86 kernel wrapper
+        cat > x86_64-linux-android-clang << 'EOF'
+        #!/bin/bash
+        
+        KERNEL_FLAGS=(
+          -target x86_64-linux-gnu
+          -fcolor-diagnostics
+          -fintegrated-as
+          -fno-builtin
+          -fno-PIE
+          -nostdinc
+          -mno-global-merge
+          -mno-implicit-float
+          -fno-delete-null-pointer-checks
+          -fno-stack-protector
+          -fno-common
+          -pipe
+          -O2
+          -fomit-frame-pointer
+          -Wno-unused-command-line-argument
+          -Wno-gnu
+          -Wno-asm-operand-widths
+          -Wno-initializer-overrides
+          -Wno-tautological-constant-out-of-range-compare
+          -Wno-address-of-packed-member
+        )
+        
+        exec "$(dirname "$0")/clang" "${KERNEL_FLAGS[@]}" "$@"
+        EOF
+        
         # Make executable
-        chmod +x aarch64-linux-android-clang arm-linux-android-clang
+        chmod +x aarch64-linux-android-clang arm-linux-android-clang x86_64-linux-android-clang
         
         # Create symlinks for compatibility
         ln -sf aarch64-linux-android-clang aarch64-linux-gnu-clang
         ln -sf arm-linux-android-clang arm-linux-gnueabi-clang
+        ln -sf x86_64-linux-android-clang x86_64-linux-gnu-clang
         ln -sf clang kernel-clang
 
     - name: Test Kernel Compilation
@@ -182,8 +211,12 @@ jobs:
         echo "Testing ARM kernel compilation..."
         ./arm-linux-android-clang -D__KERNEL__ -DMODULE -c test_module.c -o test_arm.o
         
+        # Test X86 compilation
+        echo "Testing X86 kernel compilation..."
+        ./x86_64-linux-android-clang -D__KERNEL__ -DMODULE -c test_module.c -o test_x86.o
+        
         # Verify outputs
-        file test_aarch64.o test_arm.o
+        file test_*.o
         ls -la test_*.o
 
     - name: Strip and Package
@@ -201,30 +234,30 @@ jobs:
         du -sh .
         
         # Package
-        tar -czf ../../android-kernel-clang.tar.gz .
+        tar -czf ../../android-kernel-clang20.tar.gz .
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.tag }}
-        name: Android Kernel Clang - ${{ steps.version.outputs.tag }}
-        files: android-kernel-clang.tar.gz
+        name: Android Kernel Clang 20 - ${{ steps.version.outputs.tag }}
+        files: android-kernel-clang20.tar.gz
         body: |
-          🔥 **Android Kernel Optimized Clang**
+          🔥 **Android Kernel Optimized Clang 20**
           
           **Features:**
           - ⚡ Thin LTO optimized build
           - 🎯 Android kernel specific optimizations
-          - 🛠️ AArch64 & ARM cross-compilation ready
+          - 🛠️ AArch64, ARM & X86 cross-compilation ready
           - 📦 Minimal size, maximum performance
           
           **Wrapper Scripts:**
           - `aarch64-linux-android-clang` - AArch64 kernel compiler
           - `arm-linux-android-clang` - ARM kernel compiler
+          - `x86_64-linux-android-clang` - X86 kernel compiler
           - `kernel-clang` - Generic kernel compiler
           
           **Targets:** AArch64, ARM, X86
-          **Size:** ~50MB (vs 200MB+ standard builds)
           
           Ready for Android kernel compilation!
       env:
