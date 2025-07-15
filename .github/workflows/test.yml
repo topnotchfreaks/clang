@@ -36,6 +36,14 @@ jobs:
         chmod +x llvm.sh
         sudo ./llvm.sh 20
         
+        # Install only needed components
+        sudo apt-get install -y clang-20 lld-20 llvm-20-tools clang-tools-20
+        
+        # Set as default alternatives
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+        sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-20 100
+        
         # Verify installation
         /usr/bin/clang-20 --version || exit 1
         /usr/bin/lld-20 --version || exit 1
@@ -51,6 +59,10 @@ jobs:
         
         # Copy libraries
         cp -vr /usr/lib/llvm-20/lib/clang clang-20/lib/ || exit 1
+        
+        # Cleanup
+        sudo apt-get autoremove -y
+        sudo apt-get clean
 
     - name: Optimize Toolchain
       run: |
