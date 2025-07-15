@@ -23,14 +23,15 @@ jobs:
 
     - name: Clone LLVM
       run: |
-        git clone --depth=1 --branch=release/20.x https://github.com/llvm/llvm-project.git
+        git clone --depth=1 --branch=release/20.x https://github.com/llvm/llvm-project.git  
 
     - name: Configure Build
       run: |
         mkdir build && cd build
         cmake -G Ninja ../llvm-project/llvm \
           -DLLVM_ENABLE_PROJECTS="clang;lld" \
-          -DLLVM_TARGETS_TO_BUILD="AArch64" \
+          -DLLVM_TARGETS_TO_BUILD="AArch64;X86" \
+          -DLLVM_DEFAULT_TARGET_TRIPLE="x86_64-linux-gnu" \
           -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_C_COMPILER=gcc \
           -DCMAKE_CXX_COMPILER=g++ \
@@ -59,16 +60,26 @@ jobs:
       run: |
         cd build/install/bin
         
+        # Create wrapper scripts with proper target triples
         cat > aarch64-linux-android-clang << 'EOF'
         #!/bin/bash
         exec "$(dirname "$0")/clang" -target aarch64-linux-gnu "$@"
         EOF
         
+        cat > clang << 'EOF'
+        #!/bin/bash
+        exec "$(dirname "$0")/clang.real" -target x86_64-linux-gnu "$@"
+        EOF
+        
         chmod +x aarch64-linux-android-clang
+        chmod +x clang
+        
+        # Move original clang
+        mv clang.real clang.real || true
         
         # Create symlinks
         ln -sf aarch64-linux-android-clang aarch64-linux-gnu-clang
-        ln -sf clang android-clang
+        ln -sf aarch64-linux-android-clang android-clang
         
         # Create binutils symlinks for kernel builds
         ln -sf llvm-ar aarch64-linux-android-ar
@@ -102,5 +113,7 @@ jobs:
         files: clang20-android-arm64.tar.gz
         body: |
           🔧 **TopNotchFreaks Clang 20 for Android ARM64 Kernel Compilation**
+          - Default host target: x86_64-linux-gnu
+          - Android ARM64 target: aarch64-linux-gnu
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
