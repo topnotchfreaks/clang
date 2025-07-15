@@ -23,7 +23,11 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y wget xz-utils tar build-essential libtinfo5
+        sudo apt-get install -y wget xz-utils tar build-essential libtinfo6
+        # For 32-bit support on 64-bit systems (optional but recommended)
+        sudo dpkg --add-architecture i386
+        sudo apt-get update
+        sudo apt-get install -y libtinfo6:i386
 
     - name: Install Clang 20 from APT
       run: |
