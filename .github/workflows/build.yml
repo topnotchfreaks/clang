@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    name: Build Android Kernel Clang
+    name: Build Clang
     runs-on: ubuntu-latest
 
     env:
@@ -16,21 +16,10 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Set Version
-      id: version
-      run: echo "tag=tnf-clang20-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
-
     - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y cmake ninja-build python3
-
-    - name: Install Host Clang 20
-      run: |
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-        echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
-        sudo apt update
-        sudo apt install -y clang-20 lld-20 llvm-20
+        sudo apt install -y cmake ninja-build python3 git build-essential binutils-dev
 
     - name: Clone LLVM
       run: |
@@ -41,32 +30,25 @@ jobs:
         mkdir build && cd build
         cmake -G Ninja ../llvm-project/llvm \
           -DLLVM_ENABLE_PROJECTS="clang;lld" \
-          -DLLVM_TARGETS_TO_BUILD="AArch64;ARM;X86" \
+          -DLLVM_TARGETS_TO_BUILD="AArch64" \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_C_COMPILER=clang-20 \
-          -DCMAKE_CXX_COMPILER=clang++-20 \
-          -DCMAKE_C_FLAGS="-O3 -march=native -mtune=native" \
-          -DCMAKE_CXX_FLAGS="-O3 -march=native -mtune=native" \
-          -DLLVM_USE_LINKER=lld-20 \
-          -DLLVM_ENABLE_LTO=Thin \
+          -DCMAKE_C_COMPILER=gcc \
+          -DCMAKE_CXX_COMPILER=g++ \
           -DLLVM_ENABLE_ASSERTIONS=OFF \
           -DLLVM_INCLUDE_TESTS=OFF \
           -DLLVM_INCLUDE_DOCS=OFF \
           -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
-          -DLLVM_OPTIMIZED_TABLEGEN=ON \
-          -DLLVM_PARALLEL_COMPILE_JOBS=2 \
-          -DLLVM_PARALLEL_LINK_JOBS=1 \
-          -DCLANG_VENDOR="${{ env.CLANG_VENDOR }}" \
-          -DCLANG_DEFAULT_LINKER=lld \
           -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
           -DCLANG_ENABLE_ARCMT=OFF \
           -DCLANG_ENABLE_FORMAT=OFF \
+          -DLLVM_ENABLE_BINUTILS_INTEROP=ON \
+          -DCLANG_VENDOR="${{ env.CLANG_VENDOR }}" \
           -DCMAKE_INSTALL_PREFIX=$PWD/install
 
     - name: Build Clang
       run: |
         cd build
-        ninja -j8 clang lld llvm-ar llvm-nm llvm-strip llvm-objcopy
+        ninja -j$(nproc) clang lld llvm-ar llvm-nm llvm-strip llvm-objcopy llvm-objdump
 
     - name: Install Clang
       run: |
@@ -77,188 +59,48 @@ jobs:
       run: |
         cd build/install/bin
         
-        # Main Android kernel clang wrapper
         cat > aarch64-linux-android-clang << 'EOF'
         #!/bin/bash
-        
-        # Android kernel specific flags
-        KERNEL_FLAGS=(
-          -target aarch64-linux-gnu
-          -fcolor-diagnostics
-          -fintegrated-as
-          -fno-builtin
-          -fno-PIE
-          -nostdinc
-          -mgeneral-regs-only
-          -mno-global-merge
-          -mno-implicit-float
-          -fno-delete-null-pointer-checks
-          -fno-stack-protector
-          -fno-common
-          -pipe
-          -O2
-          -fomit-frame-pointer
-          # Suppress common kernel warnings
-          -Wno-unused-command-line-argument
-          -Wno-gnu
-          -Wno-asm-operand-widths
-          -Wno-initializer-overrides
-          -Wno-tautological-constant-out-of-range-compare
-          -Wno-address-of-packed-member
-        )
-        
-        exec "$(dirname "$0")/clang" "${KERNEL_FLAGS[@]}" "$@"
+        exec "$(dirname "$0")/clang" -target aarch64-linux-gnu "$@"
         EOF
         
-        # ARM kernel wrapper
-        cat > arm-linux-android-clang << 'EOF'
-        #!/bin/bash
+        chmod +x aarch64-linux-android-clang
         
-        KERNEL_FLAGS=(
-          -target arm-linux-gnueabi
-          -fcolor-diagnostics
-          -fintegrated-as
-          -fno-builtin
-          -fno-PIE
-          -nostdinc
-          -mno-global-merge
-          -mno-implicit-float
-          -fno-delete-null-pointer-checks
-          -fno-stack-protector
-          -fno-common
-          -pipe
-          -O2
-          -fomit-frame-pointer
-          -Wno-unused-command-line-argument
-          -Wno-gnu
-          -Wno-asm-operand-widths
-          -Wno-initializer-overrides
-          -Wno-tautological-constant-out-of-range-compare
-          -Wno-address-of-packed-member
-        )
-        
-        exec "$(dirname "$0")/clang" "${KERNEL_FLAGS[@]}" "$@"
-        EOF
-        
-        # X86 kernel wrapper
-        cat > x86_64-linux-android-clang << 'EOF'
-        #!/bin/bash
-        
-        KERNEL_FLAGS=(
-          -target x86_64-linux-gnu
-          -fcolor-diagnostics
-          -fintegrated-as
-          -fno-builtin
-          -fno-PIE
-          -nostdinc
-          -mno-global-merge
-          -mno-implicit-float
-          -fno-delete-null-pointer-checks
-          -fno-stack-protector
-          -fno-common
-          -pipe
-          -O2
-          -fomit-frame-pointer
-          -Wno-unused-command-line-argument
-          -Wno-gnu
-          -Wno-asm-operand-widths
-          -Wno-initializer-overrides
-          -Wno-tautological-constant-out-of-range-compare
-          -Wno-address-of-packed-member
-        )
-        
-        exec "$(dirname "$0")/clang" "${KERNEL_FLAGS[@]}" "$@"
-        EOF
-        
-        # Make executable
-        chmod +x aarch64-linux-android-clang arm-linux-android-clang x86_64-linux-android-clang
-        
-        # Create symlinks for compatibility
+        # Create symlinks
         ln -sf aarch64-linux-android-clang aarch64-linux-gnu-clang
-        ln -sf arm-linux-android-clang arm-linux-gnueabi-clang
-        ln -sf x86_64-linux-android-clang x86_64-linux-gnu-clang
-        ln -sf clang kernel-clang
+        ln -sf clang android-clang
+        
+        # Create binutils symlinks for kernel builds
+        ln -sf llvm-ar aarch64-linux-android-ar
+        ln -sf llvm-nm aarch64-linux-android-nm
+        ln -sf llvm-strip aarch64-linux-android-strip
+        ln -sf llvm-objcopy aarch64-linux-android-objcopy
+        ln -sf llvm-objdump aarch64-linux-android-objdump
 
-    - name: Test Kernel Compilation
+    - name: Test Build
       run: |
         cd build/install/bin
-        
-        # Test kernel module compilation
-        cat > test_module.c << 'EOF'
-        #include <linux/module.h>
-        #include <linux/kernel.h>
-        #include <linux/init.h>
-        
-        static int __init test_init(void) {
-            printk(KERN_INFO "Test module loaded\n");
-            return 0;
-        }
-        
-        static void __exit test_exit(void) {
-            printk(KERN_INFO "Test module unloaded\n");
-        }
-        
-        module_init(test_init);
-        module_exit(test_exit);
-        MODULE_LICENSE("GPL");
-        EOF
-        
-        # Test AArch64 compilation
-        echo "Testing AArch64 kernel compilation..."
-        ./aarch64-linux-android-clang -D__KERNEL__ -DMODULE -c test_module.c -o test_aarch64.o
-        
-        # Test ARM compilation  
-        echo "Testing ARM kernel compilation..."
-        ./arm-linux-android-clang -D__KERNEL__ -DMODULE -c test_module.c -o test_arm.o
-        
-        # Test X86 compilation
-        echo "Testing X86 kernel compilation..."
-        ./x86_64-linux-android-clang -D__KERNEL__ -DMODULE -c test_module.c -o test_x86.o
-        
-        # Verify outputs
-        file test_*.o
-        ls -la test_*.o
+        ./clang --version
+        ./aarch64-linux-android-clang --version
+        ./llvm-ar --version
+        ./aarch64-linux-android-ar --version
 
-    - name: Strip and Package
+    - name: Package
       run: |
         cd build/install
-        
-        # Strip binaries
-        strip bin/* || true
-        
-        # Remove unnecessary files
-        rm -rf share include libexec
-        
-        # Show final size
-        echo "Toolchain size:"
-        du -sh .
-        
-        # Package
-        tar -czf ../../android-kernel-clang20.tar.gz .
+        tar -czf ../../clang20-android-arm64.tar.gz .
+
+    - name: Set Version
+      id: version
+      run: echo "tag=clang20-android-arm64-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.tag }}
-        name: Android Kernel Clang 20 - ${{ steps.version.outputs.tag }}
-        files: android-kernel-clang20.tar.gz
+        name: Clang 20 Android ARM64 - ${{ steps.version.outputs.tag }}
+        files: clang20-android-arm64.tar.gz
         body: |
-          🔥 **Android Kernel Optimized Clang 20**
-          
-          **Features:**
-          - ⚡ Thin LTO optimized build
-          - 🎯 Android kernel specific optimizations
-          - 🛠️ AArch64, ARM & X86 cross-compilation ready
-          - 📦 Minimal size, maximum performance
-          
-          **Wrapper Scripts:**
-          - `aarch64-linux-android-clang` - AArch64 kernel compiler
-          - `arm-linux-android-clang` - ARM kernel compiler
-          - `x86_64-linux-android-clang` - X86 kernel compiler
-          - `kernel-clang` - Generic kernel compiler
-          
-          **Targets:** AArch64, ARM, X86
-          
-          Ready for Android kernel compilation!
+          🔧 **TopNotchFreaks Clang 20 for Android ARM64 Kernel Compilation**
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
