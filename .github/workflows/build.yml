@@ -60,22 +60,22 @@ jobs:
       run: |
         cd build/install/bin
         
-        # Create wrapper scripts with proper target triples
-        cat > aarch64-linux-android-clang << 'EOF'
-        #!/bin/bash
-        exec "$(dirname "$0")/clang" -target aarch64-linux-gnu "$@"
-        EOF
+        # Backup the original clang binary
+        mv clang clang.real
         
+        # Create host clang wrapper (for x86_64 host tools)
         cat > clang << 'EOF'
         #!/bin/bash
         exec "$(dirname "$0")/clang.real" -target x86_64-linux-gnu "$@"
         EOF
         
-        chmod +x aarch64-linux-android-clang
-        chmod +x clang
+        # Create Android ARM64 clang wrapper
+        cat > aarch64-linux-android-clang << 'EOF'
+        #!/bin/bash
+        exec "$(dirname "$0")/clang.real" -target aarch64-linux-gnu "$@"
+        EOF
         
-        # Move original clang
-        mv clang.real clang.real || true
+        chmod +x clang aarch64-linux-android-clang
         
         # Create symlinks
         ln -sf aarch64-linux-android-clang aarch64-linux-gnu-clang
