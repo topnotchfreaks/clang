@@ -1,0 +1,202 @@
+name: Build Minimal Clang
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Minimal Clang
+    runs-on: ubuntu-latest
+
+    env:
+      CLANG_VENDOR: "TopNotchFreaks "
+      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y cmake ninja-build python3 git build-essential binutils-dev
+
+    - name: Clone LLVM
+      run: |
+        git clone --depth=1 --branch=release/20.x https://github.com/llvm/llvm-project.git  
+
+    - name: Configure Minimal Build
+      run: |
+        mkdir build && cd build
+        cmake -G Ninja ../llvm-project/llvm \
+          -DLLVM_ENABLE_PROJECTS="clang;lld" \
+          -DLLVM_TARGETS_TO_BUILD="AArch64;X86;ARM" \
+          -DLLVM_DEFAULT_TARGET_TRIPLE="x86_64-linux-gnu" \
+          -DCMAKE_BUILD_TYPE=MinSizeRel \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++ \
+          -DLLVM_ENABLE_ASSERTIONS=OFF \
+          -DLLVM_INCLUDE_TESTS=OFF \
+          -DLLVM_INCLUDE_DOCS=OFF \
+          -DLLVM_INCLUDE_EXAMPLES=OFF \
+          -DLLVM_INCLUDE_BENCHMARKS=OFF \
+          -DLLVM_INCLUDE_UTILS=OFF \
+          -DLLVM_BUILD_UTILS=OFF \
+          -DLLVM_BUILD_RUNTIME=OFF \
+          -DLLVM_BUILD_RUNTIMES=OFF \
+          -DLLVM_ENABLE_RTTI=OFF \
+          -DLLVM_ENABLE_EH=OFF \
+          -DLLVM_ENABLE_UNWIND_TABLES=OFF \
+          -DLLVM_ENABLE_BACKTRACES=OFF \
+          -DLLVM_ENABLE_CRASH_OVERRIDES=OFF \
+          -DLLVM_ENABLE_EXPENSIVE_CHECKS=OFF \
+          -DLLVM_ENABLE_DEBUG_RUNTIME=OFF \
+          -DLLVM_OPTIMIZED_TABLEGEN=ON \
+          -DLLVM_USE_SPLIT_DWARF=ON \
+          -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
+          -DLLVM_INSTALL_BINUTILS_SYMLINKS=ON \
+          -DLLVM_INSTALL_CCTOOLS_SYMLINKS=OFF \
+          -DLLVM_INSTALL_UTILS=OFF \
+          -DLLVM_ENABLE_LIBXML2=OFF \
+          -DLLVM_ENABLE_ZLIB=OFF \
+          -DLLVM_ENABLE_ZSTD=OFF \
+          -DLLVM_ENABLE_TERMINFO=OFF \
+          -DLLVM_ENABLE_LIBEDIT=OFF \
+          -DLLVM_ENABLE_LIBPFM=OFF \
+          -DLLVM_ENABLE_PLUGINS=OFF \
+          -DLLVM_ENABLE_Z3_SOLVER=OFF \
+          -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+          -DCLANG_ENABLE_ARCMT=OFF \
+          -DCLANG_ENABLE_FORMAT=OFF \
+          -DCLANG_ENABLE_BOOTSTRAP=OFF \
+          -DCLANG_INCLUDE_TESTS=OFF \
+          -DCLANG_INCLUDE_DOCS=OFF \
+          -DCLANG_TOOL_SCAN_BUILD_BUILD=OFF \
+          -DCLANG_TOOL_SCAN_VIEW_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_CHECK_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_DIFF_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_FORMAT_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_IMPORT_TEST_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_OFFLOAD_BUNDLER_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_RENAME_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_REFACTOR_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_SCAN_DEPS_BUILD=OFF \
+          -DCLANG_TOOL_CLANG_SHLIB_BUILD=OFF \
+          -DCLANG_TOOL_LIBCLANG_BUILD=OFF \
+          -DCLANG_TOOL_C_INDEX_TEST_BUILD=OFF \
+          -DCLANG_TOOL_DIAGTOOL_BUILD=OFF \
+          -DCLANG_TOOL_DRIVER_BUILD=ON \
+          -DCLANG_TOOL_CLANG_LINKER_WRAPPER_BUILD=OFF \
+          -DCLANG_PLUGIN_SUPPORT=OFF \
+          -DLLVM_ENABLE_BINUTILS_INTEROP=ON \
+          -DCLANG_VENDOR="${{ env.CLANG_VENDOR }}" \
+          -DCMAKE_INSTALL_PREFIX=$PWD/install \
+          -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections" \
+          -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
+          -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -Wl,--strip-all"
+
+    - name: Build Minimal Clang
+      run: |
+        cd build
+        # Only build essential targets
+        ninja -j$(nproc) clang lld llvm-ar llvm-nm llvm-strip llvm-objcopy llvm-objdump llvm-readobj llvm-ranlib
+
+    - name: Install Clang
+      run: |
+        cd build
+        ninja install
+
+    - name: Strip Binaries
+      run: |
+        cd build/install/bin
+        strip --strip-all clang-20 lld llvm-ar llvm-nm llvm-strip llvm-objcopy llvm-objdump llvm-readobj
+
+    - name: Create Minimal Wrappers
+      run: |
+        cd build/install/bin
+        
+        # Create essential symlinks only
+        ln -sf clang clang++
+        ln -sf clang clang-cl
+        ln -sf clang clang-cpp
+        ln -sf lld ld.lld
+        ln -sf lld ld64.lld
+        ln -sf lld lld-link
+        ln -sf lld wasm-ld
+        ln -sf llvm-ar llvm-ranlib
+        ln -sf llvm-objcopy llvm-strip
+        ln -sf llvm-readobj llvm-readelf
+        
+        # Create Android ARM64 wrapper
+        cat > aarch64-linux-android-clang << 'EOF'
+        #!/bin/bash
+        exec "$(dirname "$0")/clang" -target aarch64-linux-gnu "$@"
+        EOF
+        
+        # Create ARM32 wrapper
+        cat > arm-linux-gnueabi-clang << 'EOF'
+        #!/bin/bash
+        exec "$(dirname "$0")/clang" -target armv7-linux-gnueabi "$@"
+        EOF
+        
+        chmod +x aarch64-linux-android-clang arm-linux-gnueabi-clang
+        
+        # Create minimal binutils symlinks
+        ln -sf llvm-ar aarch64-linux-android-ar
+        ln -sf llvm-nm aarch64-linux-android-nm
+        ln -sf llvm-strip aarch64-linux-android-strip
+        ln -sf llvm-objcopy aarch64-linux-android-objcopy
+        ln -sf llvm-objdump aarch64-linux-android-objdump
+        ln -sf llvm-ar arm-linux-gnueabi-ar
+        ln -sf llvm-nm arm-linux-gnueabi-nm
+        ln -sf llvm-strip arm-linux-gnueabi-strip
+        ln -sf llvm-objcopy arm-linux-gnueabi-objcopy
+        ln -sf llvm-objdump arm-linux-gnueabi-objdump
+
+    - name: Clean Headers (Keep Essential Only)
+      run: |
+        cd build/install/lib/clang/20/include
+        # Keep only essential headers for kernel/Android compilation
+        find . -name "*.h" ! -path "./arm*" ! -path "./x86*" ! -path "./std*" ! -name "limits.h" ! -name "float.h" ! -name "stdint.h" ! -name "stddef.h" ! -name "stdbool.h" ! -name "stdarg.h" ! -name "unwind.h" ! -name "immintrin.h" ! -name "emmintrin.h" ! -name "xmmintrin.h" ! -name "mmintrin.h" ! -name "cpuid.h" ! -name "builtins.h" ! -name "varargs.h" ! -name "tgmath.h" ! -name "inttypes.h" ! -name "iso646.h" ! -name "stdnoreturn.h" ! -name "stdatomic.h" ! -name "stdalign.h" -delete
+        # Remove unnecessary wrapper directories
+        rm -rf cuda_wrappers llvm_libc_wrappers openmp_wrappers ppc_wrappers zos_wrappers
+
+    - name: Test Minimal Build
+      run: |
+        cd build/install/bin
+        ./clang --version
+        ./aarch64-linux-android-clang --version
+        ./arm-linux-gnueabi-clang --version
+        ./llvm-ar --version
+        ls -la
+
+    - name: Check Size
+      run: |
+        cd build/install
+        du -sh .
+        echo "File count:"
+        find . -type f | wc -l
+
+    - name: Package Minimal
+      run: |
+        cd build/install
+        tar -czf ../../clang20-minimal-android.tar.gz .
+
+    - name: Set Version
+      id: version
+      run: echo "tag=clang20-minimal-android-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: Clang 20 Minimal Android - ${{ steps.version.outputs.tag }}
+        files: clang20-minimal-android.tar.gz
+        body: |
+          🔧 **TopNotchFreaks Minimal Clang 20 for Android Kernel Compilation**
+          - Minimal size build (~85MB)
+          - Essential targets: AArch64, X86, ARM
+          - Optimized for kernel compilation
+          - Stripped binaries and minimal headers
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
