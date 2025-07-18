@@ -1,0 +1,117 @@
+name: Build Clang test
+description: Build and test Clang with various configurations
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Clang
+    runs-on: ubuntu-latest
+
+    env:
+      CLANG_VENDOR: "TopNotchFreaks "
+      GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y cmake ninja-build python3 git build-essential binutils-dev
+
+    - name: Clone LLVM
+      run: |
+        git clone --depth=1 --branch=release/20.x https://github.com/llvm/llvm-project.git
+
+    - name: Configure Build
+      run: |
+        mkdir build && cd build
+        cmake -G Ninja ../llvm-project/llvm \
+          -DLLVM_ENABLE_PROJECTS="clang;lld;polly" \
+          -DLLVM_TARGETS_TO_BUILD="AArch64;X86;ARM" \
+          -DLLVM_DEFAULT_TARGET_TRIPLE="x86_64-linux-gnu" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER=gcc \
+          -DCMAKE_CXX_COMPILER=g++ \
+          -DLLVM_ENABLE_ASSERTIONS=OFF \
+          -DLLVM_INCLUDE_TESTS=OFF \
+          -DLLVM_INCLUDE_DOCS=OFF \
+          -DLLVM_INSTALL_TOOLCHAIN_ONLY=OFF \
+          -DCLANG_ENABLE_STATIC_ANALYZER=ON \
+          -DCLANG_ENABLE_ARCMT=ON \
+          -DCLANG_ENABLE_FORMAT=ON \
+          -DLLVM_ENABLE_BINUTILS_INTEROP=ON \
+          -DCLANG_VENDOR="${{ env.CLANG_VENDOR }}" \
+          -DCMAKE_INSTALL_PREFIX=$PWD/install \
+          -DLLVM_INCLUDE_UTILS=ON \
+          -DLLVM_INSTALL_UTILS=ON
+
+    - name: Build Clang
+      run: |
+        cd build
+        ninja -j$(nproc) clang lld llvm-ar llvm-nm llvm-strip llvm-objcopy llvm-objdump llvm-readobj llvm-ranlib Polly
+
+    - name: Install Clang
+      run: |
+        cd build
+        ninja install
+
+    - name: Create Binaries and Symlinks
+      run: |
+        cd build/install/bin
+        mv clang clang-20
+        ln -sf clang-20 clang
+        ln -sf clang clang++
+        ln -sf clang clang-cl
+        ln -sf clang clang-cpp
+        ln -sf lld ld.lld
+        ln -sf lld ld64.lld
+        ln -sf lld lld-link
+        ln -sf lld wasm-ld
+        ln -sf llvm-ar llvm-ranlib
+        ln -sf llvm-readobj llvm-readelf
+        ln -sf llvm-objcopy llvm-strip
+        chmod +x clang clang++ clang-cl clang-cpp ld.lld ld64.lld lld-link wasm-ld
+
+    - name: Verify Installation
+      run: |
+        cd build/install
+        find bin lib -type f -o -type l | sort
+        ls -l bin
+        ls -lR lib/clang/20/include
+
+    - name: Test Build
+      run: |
+        cd build/install/bin
+        ./clang-20 --version
+        ./lld --version
+        ./llvm-ar --version
+        ./llvm-nm --version
+        ./llvm-objcopy --version
+        ./llvm-readobj --version
+
+    - name: Package
+      run: |
+        cd build/install
+        tar -czf ../../clang20.tar.gz bin lib
+
+    - name: Set Version
+      id: version
+      run: echo "tag=clang20-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: Clang 20 - ${{ steps.version.outputs.tag }}
+        files: clang20.tar.gz
+        body: |
+          🔧 **TopNotchFreaks Clang 20**
+          - Default host target: x86_64-linux-gnu
+          - Includes tools: clang, clang++, lld, llvm-ar, llvm-nm, llvm-objcopy, llvm-readobj
+          - Header files under lib/clang/20/include
+      env:
+        GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
