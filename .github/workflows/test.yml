@@ -59,14 +59,25 @@ jobs:
         cd build
         ninja install
 
+    - name: Debug Directory Contents
+      run: |
+        cd build/install/bin
+        ls -l
+
     - name: Create Binaries and Symlinks
       run: |
         cd build/install/bin
-        mv clang clang-20
+        # Remove existing symlinks or files to avoid conflicts
+        rm -f clang clang-20 clang++ clang-cl clang-cpp ld.lld ld64.lld lld-link wasm-ld llvm-ranlib llvm-readelf llvm-strip
+        # Rename clang to clang-20 only if it exists and is not already clang-20
+        if [ -f clang ] && [ ! clang -ef clang-20 ]; then
+          mv clang clang-20
+        fi
+        # Create symlinks
         ln -sf clang-20 clang
-        ln -sf clang clang++
-        ln -sf clang clang-cl
-        ln -sf clang clang-cpp
+        ln -sf clang-20 clang++
+        ln -sf clang-20 clang-cl
+        ln -sf clang-20 clang-cpp
         ln -sf lld ld.lld
         ln -sf lld ld64.lld
         ln -sf lld lld-link
