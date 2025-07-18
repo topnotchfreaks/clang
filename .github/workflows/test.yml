@@ -73,19 +73,49 @@ jobs:
         if [ -f clang ] && [ ! clang -ef clang-20 ]; then
           mv clang clang-20
         fi
-        # Create symlinks
-        ln -sf clang-20 clang
-        ln -sf clang-20 clang++
-        ln -sf clang-20 clang-cl
-        ln -sf clang-20 clang-cpp
-        ln -sf lld ld.lld
-        ln -sf lld ld64.lld
-        ln -sf lld lld-link
-        ln -sf lld wasm-ld
-        ln -sf llvm-ar llvm-ranlib
-        ln -sf llvm-readobj llvm-readelf
-        ln -sf llvm-objcopy llvm-strip
-        chmod +x clang clang++ clang-cl clang-cpp ld.lld ld64.lld lld-link wasm-ld
+        # Check if clang-20 exists before creating symlinks
+        if [ -f clang-20 ]; then
+          ln -sf clang-20 clang
+          ln -sf clang-20 clang++
+          ln -sf clang-20 clang-cl
+          ln -sf clang-20 clang-cpp
+          chmod +x clang clang++ clang-cl clang-cpp
+        else
+          echo "Error: clang-20 not found, skipping clang-related symlinks"
+          exit 1
+        fi
+        # Create other symlinks and set permissions if target files exist
+        if [ -f lld ]; then
+          ln -sf lld ld.lld
+          ln -sf lld ld64.lld
+          ln -sf lld lld-link
+          ln -sf lld wasm-ld
+          chmod +x ld.lld ld64.lld lld-link wasm-ld
+        else
+          echo "Error: lld not found, skipping lld-related symlinks"
+          exit 1
+        fi
+        if [ -f llvm-ar ]; then
+          ln -sf llvm-ar llvm-ranlib
+          chmod +x llvm-ranlib
+        else
+          echo "Error: llvm-ar not found, skipping llvm-ranlib symlink"
+          exit 1
+        fi
+        if [ -f llvm-readobj ]; then
+          ln -sf llvm-readobj llvm-readelf
+          chmod +x llvm-readelf
+        else
+          echo "Error: llvm-readobj not found, skipping llvm-readelf symlink"
+          exit 1
+        fi
+        if [ -f llvm-objcopy ]; then
+          ln -sf llvm-objcopy llvm-strip
+          chmod +x llvm-strip
+        else
+          echo "Error: llvm-objcopy not found, skipping llvm-strip symlink"
+          exit 1
+        fi
 
     - name: Verify Installation
       run: |
