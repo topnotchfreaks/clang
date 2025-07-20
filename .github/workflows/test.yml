@@ -20,7 +20,7 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y cmake ninja-build python3 git build-essential binutils-dev ccache
-        wget https://github.com/llvm/llvm-project/releases/download/llvmorg-20.0.0/clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+        wget https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.8/LLVM-20.1.8-Linux-X64.tar.xz 
         tar -xf clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04.tar.xz
         export PATH=$PWD/clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04/bin:$PATH
 
