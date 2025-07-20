@@ -1,5 +1,4 @@
 name: Build Clang test
-description: Build and test Clang with various configurations
 
 on:
   workflow_dispatch:
@@ -20,139 +19,135 @@ jobs:
     - name: Install Dependencies
       run: |
         sudo apt update
-        sudo apt install -y cmake ninja-build python3 git build-essential binutils-dev
+        sudo apt install -y cmake ninja-build python3 git build-essential binutils-dev ccache
+        wget https://github.com/llvm/llvm-project/releases/download/llvmorg-20.0.0/clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+        tar -xf clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04.tar.xz
+        export PATH=$PWD/clang+llvm-20.0.0-x86_64-linux-gnu-ubuntu-22.04/bin:$PATH
 
     - name: Clone LLVM
       run: |
-        git clone --depth=1 --branch=release/20.x https://github.com/llvm/llvm-project.git
+        git clone --depth=1 --branch=release/20.x https://github.com/llvm/llvm-project.git  
+
+    - name: Download AOSP Sysroot
+      run: |
+        wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/master.tar.gz
+        mkdir -p sysroot && tar -xf master.tar.gz -C sysroot
 
     - name: Configure Build
       run: |
         mkdir build && cd build
         cmake -G Ninja ../llvm-project/llvm \
-          -DLLVM_ENABLE_PROJECTS="clang;lld;polly" \
+          -DLLVM_ENABLE_PROJECTS="clang;lld" \
           -DLLVM_TARGETS_TO_BUILD="AArch64;X86;ARM" \
           -DLLVM_DEFAULT_TARGET_TRIPLE="x86_64-linux-gnu" \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_C_COMPILER=gcc \
-          -DCMAKE_CXX_COMPILER=g++ \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_CXX_COMPILER=clang++ \
+          -DLLVM_ENABLE_LTO=Thin \
           -DLLVM_ENABLE_ASSERTIONS=OFF \
           -DLLVM_INCLUDE_TESTS=OFF \
           -DLLVM_INCLUDE_DOCS=OFF \
-          -DLLVM_INSTALL_TOOLCHAIN_ONLY=OFF \
-          -DCLANG_ENABLE_STATIC_ANALYZER=ON \
-          -DCLANG_ENABLE_ARCMT=ON \
-          -DCLANG_ENABLE_FORMAT=ON \
+          -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
+          -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+          -DCLANG_ENABLE_ARCMT=OFF \
+          -DCLANG_ENABLE_FORMAT=OFF \
           -DLLVM_ENABLE_BINUTILS_INTEROP=ON \
           -DCLANG_VENDOR="${{ env.CLANG_VENDOR }}" \
-          -DCMAKE_INSTALL_PREFIX=$PWD/install \
-          -DLLVM_INCLUDE_UTILS=ON \
-          -DLLVM_INSTALL_UTILS=ON
+          -DCMAKE_INSTALL_PREFIX=$PWD/install
 
     - name: Build Clang
       run: |
         cd build
-        ninja -j$(nproc) clang lld llvm-ar llvm-nm llvm-strip llvm-objcopy llvm-objdump llvm-readobj llvm-ranlib Polly
+        ninja -j$(nproc --all | awk '{print ($1 > 4) ? 4 : $1}') clang lld llvm-ar llvm-nm llvm-strip llvm-objcopy llvm-objdump
 
     - name: Install Clang
       run: |
         cd build
         ninja install
 
-    - name: Debug Directory Contents
+    - name: Create Android Kernel Wrapper
       run: |
         cd build/install/bin
-        ls -l
-
-    - name: Create Binaries and Symlinks
-      run: |
-        cd build/install/bin
-        # Remove existing symlinks or files to avoid conflicts
-        rm -f clang clang-20 clang++ clang-cl clang-cpp ld.lld ld64.lld lld-link wasm-ld llvm-ranlib llvm-readelf llvm-strip
-        # Rename clang to clang-20 only if it exists and is not already clang-20
-        if [ -f clang ] && [ ! clang -ef clang-20 ]; then
-          mv clang clang-20
-        fi
-        # Check if clang-20 exists before creating symlinks
-        if [ -f clang-20 ]; then
-          ln -sf clang-20 clang
-          ln -sf clang-20 clang++
-          ln -sf clang-20 clang-cl
-          ln -sf clang-20 clang-cpp
-          chmod +x clang clang++ clang-cl clang-cpp
-        else
-          echo "Error: clang-20 not found, skipping clang-related symlinks"
-          exit 1
-        fi
-        # Create other symlinks and set permissions if target files exist
-        if [ -f lld ]; then
-          ln -sf lld ld.lld
-          ln -sf lld ld64.lld
-          ln -sf lld lld-link
-          ln -sf lld wasm-ld
-          chmod +x ld.lld ld64.lld lld-link wasm-ld
-        else
-          echo "Error: lld not found, skipping lld-related symlinks"
-          exit 1
-        fi
-        if [ -f llvm-ar ]; then
-          ln -sf llvm-ar llvm-ranlib
-          chmod +x llvm-ranlib
-        else
-          echo "Error: llvm-ar not found, skipping llvm-ranlib symlink"
-          exit 1
-        fi
-        if [ -f llvm-readobj ]; then
-          ln -sf llvm-readobj llvm-readelf
-          chmod +x llvm-readelf
-        else
-          echo "Error: llvm-readobj not found, skipping llvm-readelf symlink"
-          exit 1
-        fi
-        if [ -f llvm-objcopy ]; then
-          ln -sf llvm-objcopy llvm-strip
-          chmod +x llvm-strip
-        else
-          echo "Error: llvm-objcopy not found, skipping llvm-strip symlink"
-          exit 1
-        fi
-
-    - name: Verify Installation
-      run: |
-        cd build/install
-        find bin lib -type f -o -type l | sort
-        ls -l bin
-        ls -lR lib/clang/20/include
+        
+        # Backup the original clang binary
+        mv clang clang.real
+        
+        # Create host clang wrapper
+        cat > clang << 'EOF'
+        #!/bin/bash
+        exec ccache "$(dirname "$0")/clang.real" -target x86_64-linux-gnu -O2 -g0 -fno-lto -fno-strict-aliasing "$@"
+        EOF
+        
+        # Create Android ARM64 clang wrapper
+        cat > aarch64-linux-android-clang << 'EOF'
+        #!/bin/bash
+        exec ccache "$(dirname "$0")/clang.real" -target aarch64-linux-gnu -O2 -g0 -fno-lto -fno-strict-aliasing --sysroot=$PWD/../../sysroot "$@"
+        EOF
+        
+        # Create ARM32 clang wrapper
+        cat > arm-linux-gnueabi-clang << 'EOF'
+        #!/bin/bash
+        exec ccache "$(dirname "$0")/clang.real" -target armv7-linux-gnueabi -O2 -g0 -fno-lto -fno-strict-aliasing --sysroot=$PWD/../../sysroot "$@"
+        EOF
+        
+        chmod +x clang aarch64-linux-android-clang arm-linux-gnueabi-clang
+        
+        # Create symlinks
+        ln -sf aarch64-linux-android-clang aarch64-linux-gnu-clang
+        ln -sf aarch64-linux-android-clang android-clang
+        ln -sf arm-linux-gnueabi-clang armv7-linux-gnueabi-clang
+        
+        # Create binutils symlinks
+        ln -sf llvm-ar aarch64-linux-android-ar
+        ln -sf llvm-nm aarch64-linux-android-nm
+        ln -sf llvm-strip aarch64-linux-android-strip
+        ln -sf llvm-objcopy aarch64-linux-android-objcopy
+        ln -sf llvm-objdump aarch64-linux-android-objdump
+        
+        ln -sf llvm-ar arm-linux-gnueabi-ar
+        ln -sf llvm-nm arm-linux-gnueabi-nm
+        ln -sf llvm-strip arm-linux-gnueabi-strip
+        ln -sf llvm-objcopy arm-linux-gnueabi-objcopy
+        ln -sf llvm-objdump arm-linux-gnueabi-objdump
 
     - name: Test Build
       run: |
         cd build/install/bin
-        ./clang-20 --version
-        ./lld --version
+        ./clang --version
+        ./aarch64-linux-android-clang --version
+        ./arm-linux-gnueabi-clang --version
         ./llvm-ar --version
-        ./llvm-nm --version
-        ./llvm-objcopy --version
-        ./llvm-readobj --version
+        ./aarch64-linux-android-ar --version
+
+    - name: Test Kernel Build
+      run: |
+        git clone --depth=1 https://android.googlesource.com/kernel/common -b android-mainline
+        cd common
+        export PATH=$PWD/../build/install/bin:$PATH
+        export CC=aarch64-linux-android-clang
+        export LD=ld.lld
+        make -j$(nproc --all | awk '{print ($1 > 4) ? 4 : $1}') ARCH=arm64 defconfig
+        time make -j$(nproc --all | awk '{print ($1 > 4) ? 4 : $1}') ARCH=arm64
 
     - name: Package
       run: |
         cd build/install
-        tar -czf ../../clang20.tar.gz bin lib
+        tar -czf ../../clang20-android-arm64.tar.gz .
 
     - name: Set Version
       id: version
-      run: echo "tag=clang20-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
+      run: echo "tag=clang20-android-arm64-$(date +'%Y%m%d-%H%M')" >> "$GITHUB_OUTPUT"
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.tag }}
-        name: Clang 20 - ${{ steps.version.outputs.tag }}
-        files: clang20.tar.gz
+        name: Clang 20 Android ARM64 - ${{ steps.version.outputs.tag }}
+        files: clang20-android-arm64.tar.gz
         body: |
-          🔧 **TopNotchFreaks Clang 20**
+          🔧 **TopNotchFreaks Clang 20 for Android ARM64 Kernel Compilation**
           - Default host target: x86_64-linux-gnu
-          - Includes tools: clang, clang++, lld, llvm-ar, llvm-nm, llvm-objcopy, llvm-readobj
-          - Header files under lib/clang/20/include
+          - Android ARM64 target: aarch64-linux-gnu
+          - ARM32 target: armv7-linux-gnueabi (for vdso32)
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
