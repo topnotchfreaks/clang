@@ -1,0 +1,231 @@
+name: "Download and Release Clang"
+
+on:
+  workflow_dispatch:
+    inputs:
+      clang_version:
+        description: "Clang version to download (e.g., r584948)"
+        required: true
+        type: string
+        default: "r584948"
+      release_tag:
+        description: "Release tag name"
+        required: false
+        type: string
+        default: ""
+      create_release:
+        description: "Create GitHub release?"
+        required: true
+        type: boolean
+        default: true
+
+env:
+  CLANG_VERSION: ${{ github.event.inputs.clang_version }}
+  CLANG_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source"
+
+jobs:
+  download-and-release-clang:
+    name: "📥 Download Clang ${{ github.event.inputs.clang_version }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "📦 Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "🔧 Install dependencies"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y aria2 p7zip-full p7zip-rar
+
+      - name: "📥 Download Clang ${{ env.CLANG_VERSION }}"
+        id: download
+        run: |
+          # Create output directory
+          mkdir -p clang-${{ env.CLANG_VERSION }}
+          mkdir -p artifacts
+          
+          # Set release tag if not provided
+          if [ -z "${{ github.event.inputs.release_tag }}" ]; then
+            RELEASE_TAG="clang-${{ env.CLANG_VERSION }}-$(date +'%Y%m%d')"
+          else
+            RELEASE_TAG="${{ github.event.inputs.release_tag }}"
+          fi
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+          
+          # Download Clang from Google's Android repository
+          echo "🚀 Downloading Clang ${{ env.CLANG_VERSION }} from AOSP..."
+          aria2c -x 16 -s 16 -o "clang-${{ env.CLANG_VERSION }}.tar.gz" \
+            "${{ env.CLANG_URL }}/clang-${{ env.CLANG_VERSION }}.tar.gz"
+          
+          # Check if download was successful
+          if [ ! -f "clang-${{ env.CLANG_VERSION }}.tar.gz" ]; then
+            echo "❌ Failed to download Clang ${{ env.CLANG_VERSION }}"
+            exit 1
+          fi
+          
+          # Extract the archive
+          echo "📦 Extracting Clang..."
+          tar -xzf "clang-${{ env.CLANG_VERSION }}.tar.gz" -C "clang-${{ env.CLANG_VERSION }}"
+          
+          # Verify extraction
+          if [ ! -d "clang-${{ env.CLANG_VERSION }}/bin" ]; then
+            echo "❌ Extraction failed - bin directory not found"
+            exit 1
+          fi
+          
+          # Show Clang version
+          echo "✅ Clang downloaded and extracted successfully"
+          echo "⚙️ Clang version:"
+          ./clang-${{ env.CLANG_VERSION }}/bin/clang --version
+          
+          # Create compressed archives
+          echo "📦 Creating compressed archives..."
+          
+          # Create tar.gz archive
+          tar -czf "artifacts/clang-${{ env.CLANG_VERSION }}-linux-x86.tar.gz" -C "clang-${{ env.CLANG_VERSION }}" .
+          
+          # Create zip archive
+          cd "clang-${{ env.CLANG_VERSION }}"
+          zip -r "../artifacts/clang-${{ env.CLANG_VERSION }}-linux-x86.zip" ./*
+          cd ..
+          
+          # Get file sizes
+          TAR_SIZE=$(du -h "artifacts/clang-${{ env.CLANG_VERSION }}-linux-x86.tar.gz" | cut -f1)
+          ZIP_SIZE=$(du -h "artifacts/clang-${{ env.CLANG_VERSION }}-linux-x86.zip" | cut -f1)
+          
+          echo "TAR_SIZE=$TAR_SIZE" >> $GITHUB_ENV
+          echo "ZIP_SIZE=$ZIP_SIZE" >> $GITHUB_ENV
+          
+          # List artifacts
+          echo "✅ Artifacts created:"
+          ls -lh artifacts/
+          
+          # Set output for release
+          echo "archive_path=$(pwd)/artifacts" >> $GITHUB_OUTPUT
+
+      - name: "📤 Upload artifacts (tar.gz)"
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ env.CLANG_VERSION }}-linux-x86-tar.gz
+          path: artifacts/clang-${{ env.CLANG_VERSION }}-linux-x86.tar.gz
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: "📤 Upload artifacts (zip)"
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ env.CLANG_VERSION }}-linux-x86-zip
+          path: artifacts/clang-${{ env.CLANG_VERSION }}-linux-x86.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: "🏷️ Create GitHub Release"
+        if: github.event.inputs.create_release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "Clang ${{ env.CLANG_VERSION }} for Linux x86_64"
+          body: |
+            ## 📦 Clang ${{ env.CLANG_VERSION }} for Linux x86_64
+            
+            This release contains the Clang ${{ env.CLANG_VERSION }} toolchain downloaded directly from Google's Android Open Source Project (AOSP).
+            
+            ### 🔗 Source
+            - Downloaded from: `${{ env.CLANG_URL }}/clang-${{ env.CLANG_VERSION }}.tar.gz`
+            - Original source: [Android Git Repository](https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/)
+            
+            ### 📁 Included files:
+            - `clang-${{ env.CLANG_VERSION }}-linux-x86.tar.gz` (${{ env.TAR_SIZE }})
+            - `clang-${{ env.CLANG_VERSION }}-linux-x86.zip` (${{ env.ZIP_SIZE }})
+            
+            ### ⚙️ Clang Version Information:
+            ```
+            ${{ steps.download.outputs.clang_version_info }}
+            ```
+            
+            ### 📝 Usage
+            ```bash
+            # Extract the archive
+            tar -xzf clang-${{ env.CLANG_VERSION }}-linux-x86.tar.gz
+            
+            # Add to PATH
+            export PATH="$(pwd)/clang-${{ env.CLANG_VERSION }}/bin:$PATH"
+            
+            # Verify installation
+            clang --version
+            ```
+            
+            ### 🏗️ Build with this Clang
+            ```bash
+            export CC=clang
+            export CXX=clang++
+            export AR=llvm-ar
+            export NM=llvm-nm
+            export OBJCOPY=llvm-objcopy
+            export STRIP=llvm-strip
+            ```
+            
+            ### 📅 Release Date
+            $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+            
+            ### 🔒 Checksums
+            ```
+            ${{ steps.download.outputs.sha256_tar }}
+            ${{ steps.download.outputs.sha256_zip }}
+            ```
+          files: |
+            artifacts/clang-${{ env.CLANG_VERSION }}-linux-x86.tar.gz
+            artifacts/clang-${{ env.CLANG_VERSION }}-linux-x86.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+
+      - name: "📋 Generate checksums"
+        id: checksum
+        run: |
+          cd artifacts
+          echo "sha256_tar=$(sha256sum clang-${{ env.CLANG_VERSION }}-linux-x86.tar.gz | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "sha256_zip=$(sha256sum clang-${{ env.CLANG_VERSION }}-linux-x86.zip | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          
+          # Generate checksums file
+          sha256sum * > checksums.txt
+          echo "✅ Checksums generated:"
+          cat checksums.txt
+
+      - name: "📤 Upload checksums"
+        if: github.event.inputs.create_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ env.CLANG_VERSION }}-checksums
+          path: artifacts/checksums.txt
+          retention-days: 30
+
+      - name: "📱 Send Telegram notification"
+        if: always() && secrets.TELEGRAM_BOT_TOKEN && secrets.TELEGRAM_CHAT_ID
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            STATUS="✅ *SUCCESS*"
+            MESSAGE="Clang ${{ env.CLANG_VERSION }} downloaded and released successfully"
+          else
+            STATUS="❌ *FAILED*"
+            MESSAGE="Failed to download Clang ${{ env.CLANG_VERSION }}"
+          fi
+          
+          TEXT="$STATUS
+          
+          *Clang Download and Release*
+          
+          📦 *Version:* \`${{ env.CLANG_VERSION }}\`
+          🏷️ *Tag:* \`${{ env.RELEASE_TAG }}\`
+          📁 *Artifacts:*
+          • tar.gz: ${{ env.TAR_SIZE }}
+          • zip: ${{ env.ZIP_SIZE }}
+          
+          $MESSAGE
+          
+          🔗 [View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          
+          curl -s -X POST \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="$TEXT" \
+            -d parse_mode="Markdown" \
+            "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
