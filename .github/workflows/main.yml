@@ -12,184 +12,95 @@ on:
         description: "Force create release even if version exists"
         required: false
         type: boolean
-        default: true
+        default: false
 
 env:
   CLANG_URL: ${{ github.event.inputs.clang_url || 'https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r584948.tar.gz' }}
-  # RELEASE_TAG uses run_number as a unique suffix; CLANG_VERSION is derived
-  # from the URL filename at runtime inside shell steps (see download step).
-  RELEASE_TAG: "clang-build-${{ github.run_number }}"
 
 jobs:
-  check-version:
-    name: "🔍 Check Clang version"
+  build:
+    name: "🔨 Build Clang"
     runs-on: ubuntu-latest
-    outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-      current_version: ${{ steps.check.outputs.current_version }}
     steps:
       - name: "📦 Checkout repository"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: "🔍 Check if version already released"
-        id: check
-        run: |
-          # Derive a version slug from the filename in the URL
-          # e.g. ".../clang-r584948.tar.gz" → "clang-r584948"
-          VERSION=$(basename "${{ env.CLANG_URL }}" .tar.gz)
-          echo "Derived version slug: $VERSION"
-
-          FORCE_RELEASE="${{ github.event.inputs.force_release }}"
-
-          # Check if a tag for this slug already exists
-          if git ls-remote --tags origin "refs/tags/${VERSION}-*" | grep -q .; then
-            EXISTING_TAG=$(git ls-remote --tags origin "refs/tags/${VERSION}-*" | head -1 | sed 's/.*refs\/tags\///')
-            echo "⚠️ Version $VERSION already released as $EXISTING_TAG"
-
-            if [ "$FORCE_RELEASE" = "true" ]; then
-              echo "✅ Force release enabled - proceeding with build"
-              echo "should_build=true" >> $GITHUB_OUTPUT
-            else
-              echo "should_build=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "✅ No existing release found for $VERSION"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          fi
-
-          echo "current_version=$VERSION" >> $GITHUB_OUTPUT
-
-  download-and-release:
-    name: "📥 Download and Release Clang"
-    runs-on: ubuntu-latest
-    needs: check-version
-    if: needs.check-version.outputs.should_build == 'true'
-
-    steps:
-      - name: "📦 Checkout repository"
-        uses: actions/checkout@v4
-
       - name: "🔧 Install dependencies"
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y aria2 p7zip-full tree
+          sudo apt-get install -y aria2 zip
 
-      - name: "📥 Download Clang from provided URL"
-        id: download
+      - name: "📥 Download"
         run: |
-          # Create directories
-          mkdir -p downloads artifacts
-
-          CLANG_URL="${{ env.CLANG_URL }}"
-
           # Derive version slug from URL filename, e.g. "clang-r584948"
-          VERSION=$(basename "$CLANG_URL" .tar.gz)
+          VERSION=$(basename "${{ env.CLANG_URL }}" .tar.gz)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "RELEASE_TAG=${VERSION}-${{ github.run_number }}" >> $GITHUB_ENV
 
-          echo "🚀 Downloading $VERSION from:"
-          echo "$CLANG_URL"
+          # Abort early if this version already has a release (unless forced)
+          if git ls-remote --tags origin "refs/tags/${VERSION}-*" | grep -q .; then
+            EXISTING_TAG=$(git ls-remote --tags origin "refs/tags/${VERSION}-*" | head -1 | sed 's/.*refs\/tags\///')
+            echo "⚠️ Already released as $EXISTING_TAG"
+            if [ "${{ github.event.inputs.force_release }}" != "true" ]; then
+              echo "Set 'Force release' to true to override."
+              exit 1
+            fi
+            echo "✅ Force release enabled, continuing."
+          fi
 
-          # Download with retry logic
+          mkdir -p downloads
+          echo "🚀 Downloading $VERSION..."
           for i in {1..3}; do
             aria2c -x 16 -s 16 --timeout=30 --retry-wait=5 \
               -o "downloads/${VERSION}.tar.gz" \
-              "$CLANG_URL" && break || sleep 10
+              "${{ env.CLANG_URL }}" && break || sleep 10
           done
 
-          # Check if download was successful
           if [ ! -f "downloads/${VERSION}.tar.gz" ]; then
-            echo "❌ Failed to download $VERSION after 3 attempts"
+            echo "❌ Download failed after 3 attempts"
+            exit 1
+          fi
+          echo "✅ Downloaded $(du -h "downloads/${VERSION}.tar.gz" | cut -f1)"
+
+      - name: "📂 Extract"
+        run: |
+          echo "📂 Extracting ${VERSION}..."
+          mkdir -p "extract/${VERSION}"
+          tar -xzf "downloads/${VERSION}.tar.gz" -C "extract/${VERSION}"
+
+          if [ ! -d "extract/${VERSION}/bin" ]; then
+            echo "❌ Extraction failed — bin/ directory not found"
+            ls -la "extract/${VERSION}/"
             exit 1
           fi
 
-          # Get file size
-          DOWNLOAD_SIZE=$(du -h "downloads/${VERSION}.tar.gz" | cut -f1)
-          echo "DOWNLOAD_SIZE=$DOWNLOAD_SIZE" >> $GITHUB_ENV
-
-          # Extract the archive
-          echo "📦 Extracting Clang..."
-          mkdir -p "$VERSION"
-          tar -xzf "downloads/${VERSION}.tar.gz" -C "$VERSION"
-
-          # Verify extraction
-          if [ ! -d "$VERSION/bin" ]; then
-            echo "❌ Extraction failed - bin directory not found"
-            echo "Contents of extracted directory:"
-            ls -la "$VERSION/"
-            exit 1
-          fi
-
-          # Get Clang version info
-          CLANG_VERSION_INFO=$("./$VERSION/bin/clang" --version 2>&1 | head -3)
+          CLANG_VERSION_INFO=$("extract/${VERSION}/bin/clang" --version 2>&1 | head -3)
           echo "CLANG_VERSION_INFO<<EOF" >> $GITHUB_ENV
           echo "$CLANG_VERSION_INFO" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-          echo "✅ Clang downloaded and extracted successfully"
-          echo "⚙️ Clang version:"
+          echo "✅ Extracted OK"
           echo "$CLANG_VERSION_INFO"
 
-          # Create compressed archives
-          echo "📦 Creating compressed archives..."
+      - name: "🗜️ Compress as zip"
+        run: |
+          mkdir -p artifacts
+          echo "🗜️ Creating ${VERSION}-linux-x86_64.zip..."
+          cd "extract/${VERSION}"
+          zip -r9 "../../artifacts/${VERSION}-linux-x86_64.zip" .
+          cd ../..
 
-          echo "Creating tar.gz archive..."
-          tar -czf "artifacts/${VERSION}-linux-x86_64.tar.gz" -C "$VERSION" .
-
-          echo "Creating zip archive..."
-          cd "$VERSION"
-          zip -r "../artifacts/${VERSION}-linux-x86_64.zip" .
-          cd ..
-
-          # Get final sizes
-          TAR_SIZE=$(du -h "artifacts/${VERSION}-linux-x86_64.tar.gz" | cut -f1)
           ZIP_SIZE=$(du -h "artifacts/${VERSION}-linux-x86_64.zip" | cut -f1)
-
-          echo "TAR_SIZE=$TAR_SIZE" >> $GITHUB_ENV
+          ZIP_SHA256=$(sha256sum "artifacts/${VERSION}-linux-x86_64.zip" | cut -d' ' -f1)
           echo "ZIP_SIZE=$ZIP_SIZE" >> $GITHUB_ENV
-
-          # Generate checksums
-          cd artifacts
-          sha256sum "${VERSION}-linux-x86_64.tar.gz" > checksums.txt
-          sha256sum "${VERSION}-linux-x86_64.zip" >> checksums.txt
-          echo "TAR_SHA256=$(sha256sum "${VERSION}-linux-x86_64.tar.gz" | cut -d' ' -f1)" >> $GITHUB_ENV
-          echo "ZIP_SHA256=$(sha256sum "${VERSION}-linux-x86_64.zip" | cut -d' ' -f1)" >> $GITHUB_ENV
-          cd ..
-
+          echo "ZIP_SHA256=$ZIP_SHA256" >> $GITHUB_ENV
           echo "BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_ENV
 
-          echo "✅ Artifacts created:"
-          ls -lh artifacts/
+          echo "✅ zip created: $ZIP_SIZE  sha256: $ZIP_SHA256"
 
-      - name: "📤 Upload artifacts (tar.gz)"
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.VERSION }}-linux-x86_64-tar-gz
-          path: artifacts/${{ env.VERSION }}-linux-x86_64.tar.gz
-          retention-days: 30
-          if-no-files-found: error
-          compression-level: 0
-
-      - name: "📤 Upload artifacts (zip)"
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.VERSION }}-linux-x86_64-zip
-          path: artifacts/${{ env.VERSION }}-linux-x86_64.zip
-          retention-days: 30
-          if-no-files-found: error
-          compression-level: 0
-
-      - name: "📤 Upload checksums"
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.VERSION }}-checksums
-          path: artifacts/checksums.txt
-          retention-days: 30
-          if-no-files-found: error
-
-      - name: "🏷️ Create GitHub Release"
+      - name: "🏷️ Create release"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -197,147 +108,34 @@ jobs:
           body: |
             ## 📦 ${{ env.VERSION }} for Linux x86_64
 
-            This release contains the Clang toolchain downloaded directly from the provided URL.
-
             ### 🔗 Source
-            - **Version:** `${{ env.VERSION }}`
             - **Downloaded from:** `${{ env.CLANG_URL }}`
 
-            ### 📁 Included files:
+            ### 📁 File
             | File | Size | SHA256 |
             |------|------|--------|
-            | `${{ env.VERSION }}-linux-x86_64.tar.gz` | ${{ env.TAR_SIZE }} | `${{ env.TAR_SHA256 }}` |
             | `${{ env.VERSION }}-linux-x86_64.zip` | ${{ env.ZIP_SIZE }} | `${{ env.ZIP_SHA256 }}` |
 
-            ### ⚙️ Clang Version Information:
+            ### ⚙️ Clang version
             ```
             ${{ env.CLANG_VERSION_INFO }}
             ```
 
-            ### 📥 Download size
-            - Original archive: ${{ env.DOWNLOAD_SIZE }}
-
             ### 📝 Usage
             ```bash
-            # Extract the archive
-            tar -xzf ${{ env.VERSION }}-linux-x86_64.tar.gz
-
-            # Add to PATH
+            unzip ${{ env.VERSION }}-linux-x86_64.zip -d ${{ env.VERSION }}
             export PATH="$(pwd)/${{ env.VERSION }}/bin:$PATH"
-
-            # Verify installation
             clang --version
             ```
 
-            ### 🏗️ Build with this Clang
-            ```bash
-            export CC=clang
-            export CXX=clang++
-            export AR=llvm-ar
-            export NM=llvm-nm
-            export OBJCOPY=llvm-objcopy
-            export STRIP=llvm-strip
-            export LD=ld.lld
-            ```
-
-            ### 📅 Release Information
-            - **Build Date:** ${{ env.BUILD_DATE }}
-            - **Workflow Run:** [#${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            - **Release Tag:** `${{ env.RELEASE_TAG }}`
-
             ### 🔒 Verification
-            To verify the integrity of the downloaded files:
             ```bash
-            echo "${{ env.TAR_SHA256 }}  ${{ env.VERSION }}-linux-x86_64.tar.gz" | sha256sum -c
             echo "${{ env.ZIP_SHA256 }}  ${{ env.VERSION }}-linux-x86_64.zip" | sha256sum -c
             ```
 
-            ### 📋 Checksums file
-            A `checksums.txt` file is also available in the artifacts.
-          files: |
-            artifacts/${{ env.VERSION }}-linux-x86_64.tar.gz
-            artifacts/${{ env.VERSION }}-linux-x86_64.zip
-            artifacts/checksums.txt
+            ---
+            **Build date:** ${{ env.BUILD_DATE }} · [Workflow run #${{ github.run_number }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          files: artifacts/${{ env.VERSION }}-linux-x86_64.zip
           draft: false
           prerelease: false
-          generate_release_notes: true
-
-      # FIX: Secrets cannot be used in `if:` expressions — they always evaluate
-      # to empty string and the condition would silently never be true.
-      # Gate on job status only; the curl command will simply fail (non-fatally)
-      # if the secrets are not configured.
-      - name: "📱 Send Telegram notification"
-        if: always()
-        run: |
-          if [ -z "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] || [ -z "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
-            echo "⏭️ Telegram secrets not configured, skipping notification"
-            exit 0
-          fi
-
-          if [ "${{ job.status }}" = "success" ]; then
-            STATUS="✅ *SUCCESS*"
-            MESSAGE="${{ env.VERSION }} downloaded and released successfully"
-            EMOJI="🎉"
-          else
-            STATUS="❌ *FAILED*"
-            MESSAGE="Failed to download ${{ env.VERSION }}"
-            EMOJI="💥"
-          fi
-
-          TEXT="$EMOJI $STATUS
-
-          *Clang Build Workflow*
-
-          📦 *Version:* \`${{ env.VERSION }}\`
-          🏷️ *Tag:* \`${{ env.RELEASE_TAG }}\`
-
-          *Artifacts:*
-          • tar.gz: ${{ env.TAR_SIZE || 'N/A' }}
-          • zip: ${{ env.ZIP_SIZE || 'N/A' }}
-
-          $MESSAGE
-
-          🔗 [View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          📅 ${{ env.BUILD_DATE }}"
-
-          curl -s -X POST \
-            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d text="$TEXT" \
-            -d parse_mode="Markdown" \
-            -d disable_web_page_preview="true" \
-            "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage"
-
-  cleanup:
-    name: "🧹 Cleanup old releases"
-    runs-on: ubuntu-latest
-    needs: download-and-release
-    # FIX: The original condition checked for a 'schedule' trigger but no
-    # schedule was defined, so this job would never run. Changed to trigger
-    # on workflow_dispatch so it runs after every manual build.
-    if: always() && github.event_name == 'workflow_dispatch'
-    steps:
-      - name: "📦 Checkout repository"
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: "🗑️ Delete old releases (keep last 5)"
-        # FIX: Export GH_TOKEN so the `gh` CLI can authenticate; the env: block
-        # sets it in the job environment but `gh` specifically reads GH_TOKEN.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git fetch --tags
-          TAGS=$(git tag -l "clang-*" | sort -r)
-
-          COUNT=0
-          for TAG in $TAGS; do
-            COUNT=$((COUNT + 1))
-            if [ $COUNT -gt 5 ]; then
-              echo "Deleting old tag: $TAG"
-              gh release delete "$TAG" --yes || true
-              git tag -d "$TAG" || true
-              git push origin ":refs/tags/$TAG" || true
-            fi
-          done
           
